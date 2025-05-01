@@ -1,91 +1,38 @@
 from Custom_errors import vRAMError
 import struct
 
-class Memory:
-    def __init__(self, size: int = 256) -> None:
-        self.size = size
-        self.vram: dict[int, int | float | str | bool] = {i : 0 for i in range(size)}
-
-    def __str__(self) -> str:
-        return f"< Virtual memory (vRAM) with {self.size} cells. >"
-
-    def __repr__(self) -> str:
-        return self.__str__()
-
-    def view_vRAM(self) -> dict[int, Any]:
-        return self.vram
-
-    def view_address_lst(self) -> list[int]:
-        return list(self.vram.keys())
-
-    def check_free(self, address: int) -> bool:
-        if self.vram.get(address) == 0:
-            return True
-        else:
-            return False
-
-    def list_free(self) -> list[int]:
-        return_list: list[int] = []
-        
-        for key in self.vram:
-            if self.vram.get(key) == 0:
-                return_list.append(key)
-
-        return return_list
-
-    def list_occupied(self) -> dict[int, Any]:
-        occupied_list: list[int] = []
-        return_dict: dict[int, Any] = {}
-        
-        for key in self.vram:
-            if self.vram.get(key) != 0:
-                occupied_list.append(key)
-
-        for key in occupied_list:
-            return_dict[key] = self.vram.get(key)
-
-        return return_dict
-
-    def read(self, address: int) -> Any:
-        if not isinstance(address, (int)):
-            raise vRAMError(f"The given read address: {address} is not of type int.")
-
-        elif isinstance(address, (int)) and address not in self.vram.keys():
-            raise vRAMError(f"The given read address: {address} is out of bounds (size: {self.size})")
-        
-        else:
-            return self.vram.get(address)
-
-    def write(self, address: int, value: Any) -> None:
-        if not isinstance(address, (int)):
-            raise vRAMError(f"The given read address: {address} is not of type int.")
-
-        elif isinstance(address, (int)) and address not in self.vram.keys():
-            raise vRAMError(f"The given write address: {address} is out of bounds (size: {self.size})")
-        
-        else:
-            self.vram[address] = value
-
-
-
-
-
-"""The pointer has to be updated to mark the position of each arra element, now that theere
-is no unified offset!"""
 
 class Pointer:
-    def __init__(self, var_name: str, var_type: str, adrs: int, length: int, element_offsets: list[int] = None):
+    def __init__(self, var_name: str, var_type: str, adrs: int, length: int, element_offsets: list[int] | None = None):
         self.var_name: str = var_name
         self.var_type: str = var_type
         self.adrs: int = adrs
         self.length: int = length
-        self.element_offsets: list[int] = element_offsets
+        
+        if element_offsets == None:
+            self.element_offsets: list[int] = []
+        else:
+            self.element_offsets: list[int] = element_offsets
+        
+        if self.var_type in {"iarray", "farray"}:
+            self.element_indexes: list[list[int]] = self.indexer(self.element_offsets)
+        else:
+            self.element_indexes: list[list[int]] = []
 
     def __str__(self) -> str:
-        return f"< Pointer for {self.var_name} of type {self.var_type}, memory address: {self.adrs}, length {self.length}, element offsets {self.element_offsets} >"
+        return f"< Pointer for {self.var_name} of type {self.var_type}, memory address: {self.adrs}, length {self.length}, element offsets {self.element_offsets}, element indexes {self.element_indexes} >"
     
     def __repr__(self) -> str:
         return self.__str__()
+    
+    def indexer(self, offset_lst: list[int]) -> list[list[int]]:
+        indexes: list[list[int]] = []
+        previous: int = 0
+        for offset in offset_lst:
+            indexes.append([previous, offset])
+            previous = offset
+
+        return indexes
 
 
 class Memory:
@@ -180,9 +127,11 @@ class Memory:
 
         if isinstance(obj[0], (int)) and array_type == "iarray":
             expected_type: type = int  
+            var_type: str = "int"
 
         else:
-            expected_type: type = float   
+            expected_type: type = float
+            var_type: str = "float"
 
         for element in obj:
             if not isinstance(element, (expected_type)):
@@ -190,13 +139,13 @@ class Memory:
 
         for element in obj:
             if isinstance(element, (int)):
-                byte_object = self.numeric_to_byte(element)
+                byte_object = self.numeric_to_byte(element, var_type)
                 
             elif isinstance(element, (float)):
-                byte_object = self.numeric_to_byte(element)
+                byte_object = self.numeric_to_byte(element, var_type)
 
             byte_buffer.extend(byte_object)
-            element_offsets.append(len(byte_buffer)) #element_positions are buffer offsets
+            element_offsets.append(len(byte_buffer)) #element_offsets are buffer offsets
 
         return byte_buffer, element_offsets
             
@@ -206,8 +155,23 @@ class Memory:
             raise vRAMError(f"store: The supplied memory address is out of bounds: address {adrs}, vRAM addresses: {0} to {len(self.vram)}")
         
         else:
+            if obj_type == "iarray":
+                element_type: str = "int"
+        
+            elif obj_type == "farray":
+                element_type: str = "float"
+
+            elif obj_type == "char":
+                element_type: str = "char"
+            
+            elif obj_type == "string":
+                element_type: str = "string"
+
+            else:
+                raise vRAMError(f"store: the supplied array contains elements with unsupported types: {type(obj[0])}")
+
             if obj_type == "int" or obj_type == "float":
-                buffer: bytearray = self.numeric_to_byte(obj)
+                buffer: bytearray = self.numeric_to_byte(obj, element_type)
                 obj_len: int = len(buffer)
                 
                 self.vram[adrs:adrs + obj_len] = buffer
@@ -288,7 +252,9 @@ class Memory:
                     self.pointer_list[var_name].var_type = obj_type
 
             elif len(obj) > 0 and obj_type in ("iarray", "farray"):
-                buffer: bytearray = self.array_to_byte(obj = obj, array_type = obj_type)[0]
+                buffer: bytearray = bytearray()
+                new_offsets: list[int] = []
+                buffer, new_offsets = self.array_to_byte(obj = obj, array_type = obj_type)
                 block_start: int = self.pointer_list[var_name].adrs
                 block_end: int = block_start + len(buffer)
 
@@ -298,6 +264,8 @@ class Memory:
                 else:
                     self.vram[block_start : block_end] = buffer
                     self.pointer_list[var_name].var_type = obj_type
+                    self.pointer_list[var_name].element_offsets = new_offsets
+                    self.pointer_list[var_name].element_indexes = self.pointer_list[var_name].indexer(new_offsets)
 
 
             elif len(obj) > 0 and obj_type in ("char", "string"):
@@ -326,7 +294,8 @@ class Memory:
 """To do
 wite a dealloc/free function to free memory regions
 Check if I can do math operations with byte arrays
-Convert the registers to bytearrays as needed/possible
+implement a simple read function to complement load
+update the pointers so that they have an index list with element start:end position lists
 Re-tuch the lexer, parse and executor with the additional sections and new opcodes
 Implement bitwise operations
 """
