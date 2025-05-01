@@ -74,22 +74,22 @@ class Memory:
 is no unified offset!"""
 
 class Pointer:
-    def __init__(self, name: str, type: str, adrs: int, length: int, elements: list[int] = None):
-        self.name: str = name
-        self.type: str = type
+    def __init__(self, var_name: str, var_type: str, adrs: int, length: int, element_offsets: list[int] = None):
+        self.var_name: str = var_name
+        self.var_type: str = var_type
         self.adrs: int = adrs
         self.length: int = length
-        self.elements: list[int] = elements
+        self.element_offsets: list[int] = element_offsets
 
     def __str__(self) -> str:
-        return f"< Pointer for {self.name}, memory address: {self.adrs}, length {self.length} >"
+        return f"< Pointer for {self.var_name} of type {self.var_type}, memory address: {self.adrs}, length {self.length}, element offsets {self.element_offsets} >"
     
     def __repr__(self) -> str:
         return self.__str__()
 
 
 class Memory:
-    def __init__(self, size: int = 262144) -> None:
+    def __init__(self, size: int = 1048576) -> None:
         self.size = size
         self.vram: bytearray = bytearray(size)
         self.pointer_list: dict[str, Pointer] = {}
@@ -97,9 +97,9 @@ class Memory:
 
     def __str__(self) -> str:
         if len(self.occupied_addresses) == 0:
-            return f"< Virtual memory (vRAM) with {self.size} cells ({self.size/1024} KB). >"
+            return f"< Virtual memory (vRAM) with {self.size} cells ({self.size/1048576} MB). >"
         else:
-            return f"< Virtual memory (vRAM) with {self.size} cells ({self.size/1024} KB). >\n< The following addresses are occupied {self.occupied_addresses}>"
+            return f"< Virtual memory (vRAM) with {self.size} cells ({self.size/1048576} MB). >\n< The following addresses are occupied {self.occupied_addresses}>"
 
     def __repr__(self) -> str:
         return self.__str__()
@@ -111,69 +111,72 @@ class Memory:
         output_lst: list[list[int]] = []
         if len(self.pointer_list) != 0:
             for key in self.pointer_list.keys():
-                output_lst.append(list[self.pointer_list.get(key).adrs,  self.pointer_list.get(key).adrs + self.pointer_list.get(key).length])
+                output_lst.append([self.pointer_list.get(key).adrs,  self.pointer_list.get(key).adrs + self.pointer_list.get(key).length])
         
         self.occupied_addresses = output_lst
 
     def view_section(self, pntr: str) -> str:
         section_start: int = self.pointer_list.get(pntr).adrs
         section_end: int = section_start + self.pointer_list.get(pntr).length
+        
         return f"{self.vram[section_start:section_end]}"
     
-    def int_to_byte(self, value: int) -> bytearray:
-        if isinstance(value, (int)):
-            if value >= (-2 ** 8) / 2 and value <= ((2 ** 8) / 2)-1: #8 bits, little-endian
+    def numeric_to_byte(self, var: int | float, var_type: str) -> bytearray:
+        if var_type == "int" and not isinstance(var, (int)):
+            raise vRAMError(f"numeric_to_byte: expected an int based on {var_type}, but {type(var)} was supplied.")
+        
+        if var_type == "float" and not isinstance(var, (float)):
+            raise vRAMError(f"numeric_to_byte: expected a float based on {var_type}, but {type(var)} was supplied.")
+
+        if var_type not in {"int", "float"}:
+            raise vRAMError(f"numeric_to_byte: unknown variable type was supplied.")
+        
+        if var_type == "int" and isinstance(var, (int)):
+            if var >= (-2 ** 8) / 2 and var <= ((2 ** 8) / 2)-1: #8 bits, little-endian
                 frm: str = "<b"
             
-            elif value >= (-2 ** 16) / 2 and value <= ((2 ** 16) / 2)-1: #16 bits, little-endian
+            elif var >= (-2 ** 16) / 2 and var <= ((2 ** 16) / 2)-1: #16 bits, little-endian
                 frm: str = "<h"
 
-            elif value >= (-2 ** 32) / 2 and value <= ((2 ** 32) / 2)-1: #32 bits, little-endian
+            elif var >= (-2 ** 32) / 2 and var <= ((2 ** 32) / 2)-1: #32 bits, little-endian
                 frm: str = "<i"
 
-            elif value >= (-2 ** 64) / 2 and value <= ((2 ** 64) / 2)-1: #64 bits, little-endian
+            elif var >= (-2 ** 64) / 2 and var <= ((2 ** 64) / 2)-1: #64 bits, little-endian
                 frm: str = "<q"
 
             else:
-                raise vRAMError(f"The supplied value: {value} exceeds the 64-bit limit.")
+                raise vRAMError(f"numeric_to_byte: The supplied variable: {var} exceeds the 64-bit limit.")
 
-            return struct.pack(frm, value)
-
-        else:
-            raise vRAMError(f"Int to byte expected an integer argument but got {type(value)}")
-    
-    def float_to_byte(self, value: float) -> bytearray:
-        if isinstance(value, (float)):
-            if value >= (-2 ** 32) / 2 and value <= ((2 ** 32) / 2)-1: #32 bits, little-endian
+            return struct.pack(frm, var)
+        
+        elif var_type == "float" and isinstance(var, (float)):
+            if var >= (-2 ** 32) / 2 and var <= ((2 ** 32) / 2)-1: #32 bits, little-endian
                 frm: str = "<f"
 
-            elif value >= (-2 ** 64) / 2 and value <= ((2 ** 64) / 2)-1: #64 bits, little-endian
+            elif var >= (-2 ** 64) / 2 and var <= ((2 ** 64) / 2)-1: #64 bits, little-endian
                 frm: str = "<d"
 
             else:
-                raise vRAMError(f"The supplied value: {value} exceeds the 64-bit limit.")
+                raise vRAMError(f"numeric_to_byte: The supplied value: {var} exceeds the 64-bit limit.")
 
-            return struct.pack(frm, value)
+            return struct.pack(frm, var)
 
-        else:
-            raise vRAMError(f"Int to byte expected a float argument but got {type(value)}")
-
-    def array_to_byte(self, obj: list[int | float], array_type: str, adrs: int) -> bytearray:
+    def array_to_byte(self, obj: list[int | float], array_type: str) -> tuple[bytearray, list[int]]:
         byte_object: bytearray = bytearray()
         byte_buffer: bytearray = bytearray()
-        element_positions: list[int] = []
+        element_offsets: list[int] = []
         
         if not isinstance(obj, (list)) or len(obj) == 0:
-            raise vRAMError(f"alloc.array_to_bytes: expected a non-empty list, got type: {type(obj)} with length {len(obj)}.")
+            raise vRAMError(f"array_to_bytes: expected a non-empty list, got type: {type(obj)} with length {len(obj)}.")
         
         if array_type == "iarray" and not isinstance(obj[0], (int)):
-            raise vRAMError(f"alloc.array_to_bytes: element type mismatch, element type {type(obj[0])} when int was expected.")
+            raise vRAMError(f"array_to_bytes: element type mismatch, element type {type(obj[0])} when int was expected.")
 
         if array_type == "farray" and not isinstance(obj[0], (float)):
-            raise vRAMError(f"alloc.array_to_bytes: element type mismatch, element type {type(obj[0])} when float was expected.")
+            raise vRAMError(f"array_to_bytes: element type mismatch, element type {type(obj[0])} when float was expected.")
 
         if array_type not in {"iarray", "farray"}:
-            raise vRAMError(f"alloc.array_to_bytes: unknown array type was supplied.")
+            raise vRAMError(f"array_to_bytes: unknown array type was supplied.")
 
         if isinstance(obj[0], (int)) and array_type == "iarray":
             expected_type: type = int  
@@ -183,71 +186,141 @@ class Memory:
 
         for element in obj:
             if not isinstance(element, (expected_type)):
-                raise vRAMError(f"alloc.array_to_bytes: mixed element type in array, an element is of {type(element)}, when {expected_type} was expected") 
+                raise vRAMError(f"array_to_bytes: mixed element type in array, an element is of {type(element)}, when {expected_type} was expected") 
 
         for element in obj:
             if isinstance(element, (int)):
-                byte_object = self.int_to_byte(element)
+                byte_object = self.numeric_to_byte(element)
                 
             elif isinstance(element, (float)):
-                byte_object = self.float_to_byte(element)
+                byte_object = self.numeric_to_byte(element)
 
-            len_byte_objet: int = len(byte_object)
             byte_buffer.extend(byte_object)
-            element_positions.append(len(byte_buffer))
+            element_offsets.append(len(byte_buffer)) #element_positions are buffer offsets
 
-        return byte_buffer, element_positions
+        return byte_buffer, element_offsets
             
 
-    def alloc(self, var_name: str, obj: int | float | str | list[int | float | str], type: str, adrs: int) -> Pointer:
+    def store(self, var_name: str, obj: int | float | str | list[int | float | str], obj_type: str, adrs: int) -> Pointer:
         if adrs < 0 or adrs > self.size:
-            raise vRAMError(f"The supplied memory address is out of bounds: address {adrs}, vRAM addresses: {0} to {len(self.vram)}")
+            raise vRAMError(f"store: The supplied memory address is out of bounds: address {adrs}, vRAM addresses: {0} to {len(self.vram)}")
         
         else:
-            if type == "int":
-                byte_obj: bytearray = self.int_to_byte(obj)
-                offset: int = len(byte_obj)
-                self.vram[adrs:adrs + offset] = byte_obj
-                self.pointer_list[var_name] = Pointer(name = var_name, 
-                                                type = type,
-                                                adrs = adrs,
-                                                length = offset)
-            
-            elif type == "float":
-                byte_obj: bytearray = self.float_to_byte(obj)
-                offset: int = len(byte_obj)
-                self.vram[adrs:adrs + offset] = byte_obj
-                self.pointer_list[var_name] = Pointer(name = var_name, 
-                                                type = type,
-                                                adrs = adrs,
-                                                length = offset)
+            if obj_type == "int" or obj_type == "float":
+                buffer: bytearray = self.numeric_to_byte(obj)
+                obj_len: int = len(buffer)
                 
-            elif type == "char":
-                self.vram[adrs] = obj.encode(encoding = "utf-8")
-                self.pointer_list[var_name] = Pointer(name = var_name, 
-                                                type = type,
+                self.vram[adrs:adrs + obj_len] = buffer
+                self.pointer_list[var_name] = Pointer(var_name = var_name, 
+                                                var_type = obj_type,
                                                 adrs = adrs,
-                                                length = 1)
+                                                length = obj_len)
                 
-            elif type == "iarray" or type == "farray": 
+            elif obj_type == "iarray" or obj_type == "farray": 
                 buffer: bytearray = bytearray()
                 element_positions: list[int] = []
                 
-                buffer, element_positions = self.array_to_byte(obj = obj, array_type = type, adrs = adrs)
+                buffer, element_positions = self.array_to_byte(obj = obj, array_type = obj_type)
                 obj_len: int = len(buffer)
 
                 if adrs + obj_len > len(self.vram):
-                    raise vRAMError(f"The supplied array is out of bounds: array len: {obj_len}, vRAM len: {len(self.vram)}")
+                    raise vRAMError(f"store: The supplied array is out of bounds: array len: {obj_len}, vRAM len: {len(self.vram)}")
                 
                 else:
                     self.vram[adrs : adrs + obj_len] = buffer
-                    self.pointer_list[var_name] = Pointer(name = var_name, 
-                                                    type = type,
+                    self.pointer_list[var_name] = Pointer(var_name = var_name, 
+                                                    var_type = obj_type,
                                                     adrs = adrs,
                                                     length = obj_len,
-                                                    elements = element_positions)
+                                                    element_offsets = element_positions)
+                    
+            elif obj_type == "char" or obj_type == "string":
+                buffer: bytearray = obj.encode(encoding = "utf-8")
+                obj_len: int = len(buffer)
+
+                if adrs + obj_len > len(self.vram):
+                    raise vRAMError(f"stor: The supplied char or string is out of bounds: array len: {obj_len}, vRAM len: {len(self.vram)}")
+                
+                else:
+                    self.vram[adrs : adrs + obj_len] = buffer
+                    self.pointer_list[var_name] = Pointer(var_name = var_name, 
+                                                    var_type = obj_type,
+                                                    adrs = adrs,
+                                                    length = obj_len)
+                
+            
+            ptr: Pointer = self.pointer_list[var_name]
 
             self.check_occupied()
+            return ptr
+            
+    def reserve(self, size: int, block_name: str) -> Pointer:
+        if size <= 0:
+            raise vRAMError(f"reserve: size must be positive, got {size}")
+        if block_name in self.pointer_list.keys():
+            raise vRAMError(f"reserve: block '{block_name}' already exists")
+        
+        original_size: int = len(self.vram)
+        self.vram.extend(bytearray(size))
+        self.pointer_list[block_name] = Pointer(var_name = block_name, 
+                                                var_type = "reserved",
+                                                adrs = original_size,
+                                                length = size)
+        self.size = len(self.vram)
+        self.check_occupied()
+        
+        ptr: Pointer = self.pointer_list[block_name]
+
+        return ptr
+    
+    def write_reserved(self, var_name: str, obj: int | float | str | list[int | float | str], obj_type: str) -> Pointer:
+        if var_name in self.pointer_list.keys() and self.pointer_list[var_name].var_type == "reserved":
+            if obj_type in ("int", "float"):
+                buffer: bytearray = self.numeric_to_byte(obj)
+                block_start: int = self.pointer_list[var_name].adrs
+                block_end: int = block_start + len(buffer)
+
+                if len(buffer) > self.pointer_list[var_name].length:
+                    raise vRAMError("data length exceeds reserved block size")
+                
+                else:
+                    self.vram[block_start : block_end] = buffer
+                    self.pointer_list[var_name].var_type = obj_type
+
+            elif len(obj) > 0 and obj_type in ("iarray", "farray"):
+                buffer: bytearray = self.array_to_byte(obj = obj, array_type = obj_type)[0]
+                block_start: int = self.pointer_list[var_name].adrs
+                block_end: int = block_start + len(buffer)
+
+                if len(buffer) > self.pointer_list[var_name].length:
+                    raise vRAMError("data length exceeds reserved block size")
+                
+                else:
+                    self.vram[block_start : block_end] = buffer
+                    self.pointer_list[var_name].var_type = obj_type
+
+
+            elif len(obj) > 0 and obj_type in ("char", "string"):
+                buffer: bytearray = obj.encode(encoding = "utf-8")
+                block_start: int = self.pointer_list[var_name].adrs
+                block_end: int = block_start + len(buffer)
+
+                if len(buffer) > self.pointer_list[var_name].length:
+                    raise vRAMError("data length exceeds reserved block size")
+                
+                else:
+                    self.vram[block_start : block_end] = buffer
+                    self.pointer_list[var_name].var_type = obj_type
+
+            else:
+                raise vRAMError(f"write_reserved: unknown variable type {obj_type} or empty variable {len(obj)}.")
+
+        else:
+            raise vRAMError(f"write_reserved: the variable {var_name} cannot be allocated as no memory was reserved for it.")
+
+        self.check_occupied()
+        return self.pointer_list[var_name]
+            
             
 
 """To do
