@@ -199,7 +199,7 @@ class Memory:
                                                     element_offsets = element_positions)
                     
             elif obj_type == "char" or obj_type == "string":
-                buffer: bytearray = obj.encode(encoding = "utf-8")
+                buffer: bytearray = obj.encode(encoding = "iso-8859-2")
                 obj_len: int = len(buffer)
 
                 if adrs + obj_len > len(self.vram):
@@ -269,7 +269,7 @@ class Memory:
 
 
             elif len(obj) > 0 and obj_type in ("char", "string"):
-                buffer: bytearray = obj.encode(encoding = "utf-8")
+                buffer: bytearray = obj.encode(encoding = "iso-8859-2")
                 block_start: int = self.pointer_list[var_name].adrs
                 block_end: int = block_start + len(buffer)
 
