@@ -1,0 +1,1 @@
+"""Should decode the data for the output string or writing to output and for msg"""
