@@ -1,6 +1,8 @@
 from Custom_errors import vRAMError
 import struct
-
+import warnings
+from Registers import Register
+from Registers import RegisterSupervisor
 
 class Pointer:
     def __init__(self, var_name: str, var_type: str, adrs: int, length: int, element_offsets: list[int] | None = None):
@@ -13,11 +15,9 @@ class Pointer:
             self.element_offsets: list[int] = []
         else:
             self.element_offsets: list[int] = element_offsets
-        
-        if self.var_type in {"iarray", "farray"}:
-            self.element_indexes: list[list[int]] = self.indexer(self.element_offsets)
-        else:
-            self.element_indexes: list[list[int]] = []
+        self.element_indexes: list[list[int]] = []
+        self.write_window_start: int = self.adrs
+
 
     def __str__(self) -> str:
         return f"< Pointer for {self.var_name} of type {self.var_type}, memory address: {self.adrs}, length {self.length}, element offsets {self.element_offsets}, element indexes {self.element_indexes} >"
@@ -29,9 +29,10 @@ class Pointer:
         indexes: list[list[int]] = []
         previous: int = 0
         for offset in offset_lst:
-            indexes.append([previous, offset])
-            previous = offset
+            indexes.append([previous, previous + offset])
+            previous = previous + offset
 
+        self.element_indexes = indexes
         return indexes
 
 
@@ -218,25 +219,91 @@ class Memory:
             self.check_occupied()
             return ptr
             
-    def reserve(self, size: int, block_name: str) -> Pointer:
+    def reserve_over_limit(self, size: int, block_name: str) -> Pointer:
         if size <= 0:
-            raise vRAMError(f"reserve: size must be positive, got {size}")
+            raise vRAMError(f"reserve_extra: the size of the extra block must be positive and larger than 0 bytes, {size} were provided.")
+        
         if block_name in self.pointer_list.keys():
-            raise vRAMError(f"reserve: block '{block_name}' already exists")
+            raise vRAMError(f"reserve_extra: block '{block_name}' already exists")
         
         original_size: int = len(self.vram)
         self.vram.extend(bytearray(size))
-        self.pointer_list[block_name] = Pointer(var_name = block_name, 
+        self.pointer_list.update({block_name : Pointer(var_name = block_name, 
                                                 var_type = "reserved",
                                                 adrs = original_size,
-                                                length = size)
+                                                length = size)})
         self.size = len(self.vram)
         self.check_occupied()
         
-        ptr: Pointer = self.pointer_list[block_name]
+        ptr: Pointer = self.pointer_list.get(block_name)
 
         return ptr
-    
+
+    def reserve(self, size: int, adrs: int, block_name: str, overwrite: bool = False) -> Pointer:
+        if size <= 0:
+            raise vRAMError(f"reserve: the size of the reserved block must be positive and larger than 0 bytes, {size} were provided.")
+
+        if block_name in self.pointer_list.keys():
+            raise vRAMError(f"reserve: the block {block_name} is already reserved or occupied. Free the occupied block first before a new reserve.")
+
+        if overwrite == False:
+            if adrs in self.occupied_addresses:
+                raise vRAMError(f"reserve: the given address {adrs} is already reserved or occupied. Free the occupied block first before a new reserve.")
+
+            for block in self.occupied_addresses:
+                block_start: int = block[0]
+                block_end: int = block[1]
+                
+                if block[start] < (adrs + size) and block_end >= adrs:
+                    raise vRAMError(f"reserve: the given memory block overlaps with an already occupied block {block}. Free the occupied block first or shift the new block.")
+
+        self.pointer_list.update({block_name : Pointer(var_name = block_name,
+                                                       var_type = "reserved",
+                                                       adrs = adrs,
+                                                       length = size)})
+
+        self.check_occupied()
+        ptr: Pointer = self.pointer_list.get(block_name)
+
+        return ptr
+
+    def dynamic_store(self, var_name: str, source: Register, obj_type: str) -> Pointer:
+        if var_name not in self.pointer_list.keys() and self.pointer_list[var_name].var_type != "reserved":
+            raise vRAMError(f"dynamic_store: the variable {var_name} cannot be allocated as no memory was reserved for it.")
+
+        block_start: int = self.pointer_list.get(var_name).adrs
+        block_end: int = self.pointer_list.get(var_name).adrs + self.pointer_list.get(var_name).length
+        
+        transfer_buffer: bytearray = bytearray()
+        offset: int = 0
+        current_write_window: int = self.pointer_list.get(var_name).write_window_start
+
+        
+        transfer_buffer = source.read_bytes()
+        offset = len(transfer_buffer)
+
+        if current_write_window + offset > block_end:
+            raise vRAMError(f"dynamic store: the next current element form register {source.name} would exceed the length capacity of the reserved memory block.")
+            
+        self.vram[current_write_window : current_write_window + offset] = transfer_buffer
+        self.pointer_list.get(var_name).write_window_start = current_write_window + offset
+        self.pointer_list.get(var_name).element_offsets.append(offset)
+        if obj_type == "int":
+            self.pointer_list.get(var_name).var_type = "iarray"
+        
+        elif obj_type == "float":
+            self.pointer_list.get(var_name).var_type = "farray"
+
+        elif obj_type in {"char", "string"}:
+            self.pointer_list.get(var_name).var_type = "string"
+
+        self.pointer_list.get(var_name).indexer(self.pointer_list.get(var_name).element_offsets)
+
+        ptr: Pointer = self.pointer_list.get(var_name)
+        self.check_occupied()
+
+        return ptr
+
     def write_reserved(self, var_name: str, obj: int | float | str | list[int | float | str], obj_type: str) -> Pointer:
         if var_name in self.pointer_list.keys() and self.pointer_list[var_name].var_type == "reserved":
             if obj_type in ("int", "float"):
