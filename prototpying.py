@@ -273,6 +273,8 @@ instr: list[str] = test_program.split("\n")
 instr_2: list[str] = test_program_2.split("\n")
 
 
+
+
 class Token:
     def __init__(self, type: str = None, value: str = None) -> None:
         self.type: str = type
@@ -284,7 +286,9 @@ class Token:
     
     def __repr__(self) -> str:
         return self.__str__()
-    
+
+"""Updated lexer to process additional types"""
+
 def lexer(instructions: list[str], instruction_set: list[str], register_names: set[str]) -> list[Token]:
     token_lst: list[Token] = []
 
@@ -406,6 +410,9 @@ def lexer(instructions: list[str], instruction_set: list[str], register_names: s
 
     return token_lst
 
+
+"""Updated Instruction class and parser to process the type system"""
+
 class Instruction:
 
     def __init__(self, opcode: str, args: list[str | int | float], arg_types: str = None):
@@ -488,6 +495,8 @@ def parser(token_list: list[Token]) -> tuple[list[Instruction], dict[str, int]]:
 
     return instruction_list, jump_table
 
+
+"""Did not update yet, will need a serious re-work"""
 
 def code_executor(instruction_lst: list[Instruction], jump_tbl: dict[str, int], register_tbl: Registers) -> str | int:
     output_str: str = ""

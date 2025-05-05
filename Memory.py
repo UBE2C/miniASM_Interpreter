@@ -1,8 +1,9 @@
-from Custom_errors import vRAMError
+from __future__ import annotations
+
 import struct
-import warnings
-from Registers import Register
-from Registers import RegisterSupervisor
+
+from Custom_errors import vRAMError
+
 
 class Pointer:
     def __init__(self, var_name: str, var_type: str, adrs: int, length: int, element_offsets: list[int] | None = None):
@@ -20,7 +21,7 @@ class Pointer:
 
 
     def __str__(self) -> str:
-        return f"< Pointer for {self.var_name} of type {self.var_type}, memory address: {self.adrs}, length {self.length}, element offsets {self.element_offsets}, element indexes {self.element_indexes} >"
+        return f"\n< Pointer for {self.var_name} of type {self.var_type} >\n< memory address: {self.adrs} >\n< length {self.length} >\n< element offsets {self.element_offsets} >\n< element indexes {self.element_indexes} >\n"
     
     def __repr__(self) -> str:
         return self.__str__()
@@ -38,16 +39,19 @@ class Pointer:
 
 class Memory:
     def __init__(self, size: int = 1048576) -> None:
-        self.size = size
+        self.size: int = size
         self.vram: bytearray = bytearray(size)
-        self.pointer_list: dict[str, Pointer] = {}
+        self.pointer_list: dict[str, "Pointer"] = {}
         self.occupied_addresses: list[int] = []
+
+        #Connection to the other components 
+        self.register_supervisor: "RegisterSupervisor" = None
 
     def __str__(self) -> str:
         if len(self.occupied_addresses) == 0:
-            return f"< Virtual memory (vRAM) with {self.size} cells ({self.size/1048576} MB). >"
+            return f"\n< Virtual memory (vRAM) with {self.size} cells ({self.size/1048576} MB). >\n"
         else:
-            return f"< Virtual memory (vRAM) with {self.size} cells ({self.size/1048576} MB). >\n< The following addresses are occupied {self.occupied_addresses}>"
+            return f"\n< Virtual memory (vRAM) with {self.size} cells ({self.size/1048576} MB). >\n< The following addresses are occupied {self.occupied_addresses} >\n"
 
     def __repr__(self) -> str:
         return self.__str__()
@@ -63,11 +67,14 @@ class Memory:
         
         self.occupied_addresses = output_lst
 
-    def view_section(self, pntr: str) -> str:
-        section_start: int = self.pointer_list.get(pntr).adrs
-        section_end: int = section_start + self.pointer_list.get(pntr).length
+    def view_section(self, ptr: str) -> str:
+        section_start: int = self.pointer_list.get(ptr).adrs
+        section_end: int = section_start + self.pointer_list.get(ptr).length
         
         return f"{self.vram[section_start:section_end]}"
+    
+    def view_pointer(self, ptr_name: str) -> "Pointer":
+        return self.pointer_list.get(ptr_name)
     
     def numeric_to_byte(self, var: int | float, var_type: str) -> bytearray:
         if var_type == "int" and not isinstance(var, (int)):
@@ -151,28 +158,13 @@ class Memory:
         return byte_buffer, element_offsets
             
     """Static storage function in order to store register values in the vRAM one by one in the available memory (variables) - can be called by the RegisterSupervisor class"""
-    def store(self, var_name: str, obj: int | float | str | list[int | float | str], obj_type: str, adrs: int) -> Pointer:
+    def store(self, var_name: str, obj: int | float | str | list[int | float | str] | "Register", obj_type: str, adrs: int) -> "Pointer":
         if adrs < 0 or adrs > self.size:
             raise vRAMError(f"store: The supplied memory address is out of bounds: address {adrs}, vRAM addresses: {0} to {len(self.vram)}")
         
         else:
-            if obj_type == "iarray":
-                element_type: str = "int"
-        
-            elif obj_type == "farray":
-                element_type: str = "float"
-
-            elif obj_type == "char":
-                element_type: str = "char"
-            
-            elif obj_type == "string":
-                element_type: str = "string"
-
-            else:
-                raise vRAMError(f"store: the supplied array contains elements with unsupported types: {type(obj[0])}")
-
             if obj_type == "int" or obj_type == "float":
-                buffer: bytearray = self.numeric_to_byte(obj, element_type)
+                buffer: bytearray = self.numeric_to_byte(obj, obj_type)
                 obj_len: int = len(buffer)
                 
                 self.vram[adrs:adrs + obj_len] = buffer
@@ -214,12 +206,12 @@ class Memory:
                                                     length = obj_len)
                 
             
-            ptr: Pointer = self.pointer_list[var_name]
+            ptr: "Pointer" = self.pointer_list[var_name]
 
             self.check_occupied()
             return ptr
             
-    def reserve_over_limit(self, size: int, block_name: str) -> Pointer:
+    def reserve_over_limit(self, size: int, block_name: str) -> "Pointer":
         if size <= 0:
             raise vRAMError(f"reserve_extra: the size of the extra block must be positive and larger than 0 bytes, {size} were provided.")
         
@@ -235,11 +227,11 @@ class Memory:
         self.size = len(self.vram)
         self.check_occupied()
         
-        ptr: Pointer = self.pointer_list.get(block_name)
+        ptr: "Pointer" = self.pointer_list.get(block_name)
 
         return ptr
 
-    def reserve(self, size: int, adrs: int, block_name: str, overwrite: bool = False) -> Pointer:
+    def reserve(self, size: int, adrs: int, block_name: str, overwrite: bool = False) -> "Pointer":
         if size <= 0:
             raise vRAMError(f"reserve: the size of the reserved block must be positive and larger than 0 bytes, {size} were provided.")
 
@@ -254,7 +246,7 @@ class Memory:
                 block_start: int = block[0]
                 block_end: int = block[1]
                 
-                if block[start] < (adrs + size) and block_end >= adrs:
+                if block_start < (adrs + size) and block_end >= adrs:
                     raise vRAMError(f"reserve: the given memory block overlaps with an already occupied block {block}. Free the occupied block first or shift the new block.")
 
         self.pointer_list.update({block_name : Pointer(var_name = block_name,
@@ -263,12 +255,12 @@ class Memory:
                                                        length = size)})
 
         self.check_occupied()
-        ptr: Pointer = self.pointer_list.get(block_name)
+        ptr: "Pointer" = self.pointer_list.get(block_name)
 
         return ptr
-        
+
     """Dynamic storage function in order to store register values from a loop/function into a reserved memory region (array) - can be called by the RegisterSupervisor class"""
-    def dynamic_store(self, var_name: str, source: Register, obj_type: str) -> Pointer:
+    def dynamic_store(self, var_name: str, src_register: str, obj_type: str) -> "Pointer":
         if var_name not in self.pointer_list.keys() and self.pointer_list[var_name].var_type != "reserved":
             raise vRAMError(f"dynamic_store: the variable {var_name} cannot be allocated as no memory was reserved for it.")
 
@@ -280,11 +272,11 @@ class Memory:
         current_write_window: int = self.pointer_list.get(var_name).write_window_start
 
         
-        transfer_buffer = source.read_bytes()
+        transfer_buffer = self.register_supervisor.read_register_bytes(src_register)[0]
         offset = len(transfer_buffer)
 
         if current_write_window + offset > block_end:
-            raise vRAMError(f"dynamic store: the next current element form register {source.name} would exceed the length capacity of the reserved memory block.")
+            raise vRAMError(f"dynamic store: the next current element form register {src_register} would exceed the length capacity of the reserved memory block.")
             
         self.vram[current_write_window : current_write_window + offset] = transfer_buffer
         self.pointer_list.get(var_name).write_window_start = current_write_window + offset
@@ -300,12 +292,12 @@ class Memory:
 
         self.pointer_list.get(var_name).indexer(self.pointer_list.get(var_name).element_offsets)
 
-        ptr: Pointer = self.pointer_list.get(var_name)
+        ptr: "Pointer" = self.pointer_list.get(var_name)
         self.check_occupied()
 
         return ptr
 
-    def write_reserved(self, var_name: str, obj: int | float | str | list[int | float | str], obj_type: str) -> Pointer:
+    def write_reserved(self, var_name: str, obj: int | float | str | list[int | float | str], obj_type: str) -> "Pointer":
         if var_name in self.pointer_list.keys() and self.pointer_list[var_name].var_type == "reserved":
             if obj_type in ("int", "float"):
                 buffer: bytearray = self.numeric_to_byte(obj)
@@ -356,6 +348,10 @@ class Memory:
 
         self.check_occupied()
         return self.pointer_list[var_name]
+    
+
+from Registers import Register
+from Registers import RegisterSupervisor
             
             
 

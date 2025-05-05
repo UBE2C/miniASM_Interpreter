@@ -1,5 +1,9 @@
-from Custom_errors import RegisterError
+from __future__ import annotations
+
 import struct
+
+from Custom_errors import RegisterError
+
 
 class Register:
     def __init__(self, name: str, size: int = 8):
@@ -8,10 +12,10 @@ class Register:
         self.bytes: bytearray =  bytearray(size)
         self.data_type: str = "Empty"
         self.value: int | float | str | bool = self.read_value()
-        
+
 
     def __str__(self) -> str:
-        return f"< Register {self.name}, capacity: {self.limit} bytes, value: {self.bytes}, value type: {self.data_type}>"
+        return f"\n< Register {self.name} >\n< capacity: {self.limit} bytes >\n< value: {self.bytes} >\n< value type: {self.data_type} >\n"
     
     def __repr__(self) -> str:
         return self.__str__()
@@ -198,12 +202,16 @@ class Register:
 
 class RegisterSupervisor:
     def __init__(self) -> None:
-        self.register_group: dict[str, Register] = {}
+        self.register_group: dict[str, "Register"] = {}
         self.group_size: int = 0
         self.register_byte_limit: int = 8
+
+        #Connection to the other components 
+        self.vRAM: 'Memory' = None
+        self.ALU: 'Alu' = None
         
     def __str__(self) -> str:
-        return f"< RegisterSupervisor which supervises a group of {len(self.register_group)} registers. >"
+        return f"\n< RegisterSupervisor which supervises a group of {len(self.register_group)} registers. >\n"
 
     def __repr__(self) -> str:
         return self.__str__()
@@ -220,8 +228,18 @@ class RegisterSupervisor:
         
     def list_registers(self) -> list[str]:
         return list(self.register_group.keys())
+    
+    def copy_register_value(self, dest_register: str, src_register: str) -> None:
+        
+        transfer_buffer: bytearray = bytearray()
+        source_type: str = ""
 
-    def write_register(self, target_register: str, value: int | float | str | bool | Register, value_type: str) -> None:
+        transfer_buffer = self.register_group.get(src_register).read_bytes()
+        source_type = self.register_group.get(src_register).data_type
+            
+        self.register_group.get(dest_register).write(value = transfer_buffer, value_type = source_type)
+
+    def write_register(self, target_register: str, value: int | float | str | bool | "Register", value_type: str) -> None:
         if isinstance(self.register_group.get(value), (Register)) and value_type == "register":
             transfer_buffer: bytearray = bytearray()
             source_type: str = ""
@@ -256,3 +274,14 @@ class RegisterSupervisor:
             self.register_group.get(key).reset_register()
 
         return f"All register has been reset to {bytearray(self.register_byte_limit)}, Empty."
+
+    def dstore(self, src_register: str, var_name: str) -> "Pointer":
+        self.vRAM.dynamic_store(var_name = var_name, src_register = src_register, obj_type = self.register_group.get(src_register).data_type)
+
+    def store(self, src_register: str, var_name: str) -> "Pointer":
+        self.vRAM.store(var_name = var_name, obj = self.read_register_value(src_register)[0] , obj_type = self.read_register_value(src_register)[1], adrs = self.read_register_value("mar")[0])
+
+
+from Memory import Pointer
+from Memory import Memory
+from Alu import Alu

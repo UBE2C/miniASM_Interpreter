@@ -1,5 +1,8 @@
-from Custom_errors import AluError
+from __future__ import annotations
+
 import struct
+
+from Custom_errors import AluError
 
 class Alu:
     def __init__(self) -> None:  
@@ -95,5 +98,7 @@ class Alu:
                 raise AluError(f"numeric_to_byte: The supplied value: {var} exceeds the 64-bit limit.")
 
             return struct.pack(frm, var)
+
+
         
     

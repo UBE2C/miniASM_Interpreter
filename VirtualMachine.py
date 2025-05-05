@@ -1,8 +1,11 @@
 #----- Import custom classes -----#
 from Token import Token
 from Instruction import Instruction
-from Registers import Registers
+from Registers import Register
+from Registers import RegisterSupervisor
 from Memory import Memory
+from Memory import Pointer
+from Alu import Alu
 
 #----- Import custom errors -----#
 from Custom_errors import RegisterError
@@ -22,16 +25,28 @@ class VirtualMachine:
     
     def __init__(self, code) -> None:
         self.code: str = code
-        self.line_pointer: int = 0
         self.instruction_set: list[str] = self.INSTRUCTION_SET
         self.preprocessed_code = self.code.split("\n")
         self.token_list: list[Token] = []
         self.instruction_list: list[Instruction] = []
         self.jump_table: dict[str, int] = {}
-        self.register_table: Registers = Registers(31)
-        self.vRAM: Memory = Memory(256)
+        self.Registers: RegisterSupervisor = RegisterSupervisor()
+        self.vRAM: Memory = Memory()
+        self.ALU: Alu = Alu()
         self.error_list: list[str] = []
         self.output_stream: str | int = ""
+
+        self.Registers.create_register_group(register_name_base = "rx", register_size = 8, group_size = 16)
+        self.initialize_connections()
+
+    
+    def initialize_connections(self) -> str:
+        self.Registers.vRAM = self.vRAM
+        self.Registers.Alu = self.ALU
+        self.vRAM.register_supervisor = self.Registers
+        self.ALU.register_supervisor = self.Registers
+
+        return f"Each component has been successfully connected to one another."
         
         
     def __str__(self) -> str:

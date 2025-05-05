@@ -1,8 +1,9 @@
-from Instruction import Instruction
-from Registers import Registers
+from __future__ import annotations
+
 from Custom_errors import RegisterError
 
-def code_executor(instruction_lst: list[Instruction], jump_tbl: dict[str, int], register_tbl: Registers) -> str | int:
+
+def code_executor(instruction_lst: list["Instruction"], jump_tbl: dict[str, int], register_tbl: "RegisterSupervisor") -> str | int:
     output_str: str = ""
     call_stack: list[int] = []
     comp_results: dict[str, bool] = {
@@ -188,3 +189,7 @@ def code_executor(instruction_lst: list[Instruction], jump_tbl: dict[str, int], 
         ip += 1
 
     return -1
+
+from Instruction import Instruction
+from Registers import Register
+from Registers import RegisterSupervisor

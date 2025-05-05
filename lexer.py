@@ -1,26 +1,35 @@
-from Token import Token
+from __future__ import annotations
 
 
-def lexer(instructions: list[str], instruction_set: list[str]) -> list[Token]:
-    token_lst: list[Token] = []
+def lexer(instructions: list[str], instruction_set: list[str], register_names: set[str]) -> list["Token"]:
+    token_lst: list["Token"] = []
 
 
-    def operand_classifier(operand: str) -> Token:
+    def operand_classifier(operand: str) -> "Token":
         if operand.isdigit():
             return Token(type = "INT", value = operand)
                                 
         elif operand.find(".") != -1:
             return Token(type = "FLOAT", value = operand)
-                                
+        
+        elif operand in register_names:
+            return Token(type = "REGISTER", value = operand)
+        
+        elif len(operand) == 1 and not operand.isdigit():
+            return Token(type = "CHAR", value = operand)
+        
+        elif len(operand) > 1 and operand not in register_names:
+            return Token(type = "STRING", value = operand)
+
         else:
             return Token(type = "IDENT", value = operand)
     
 
-    for i in range(len(instructions)):
-        if not instructions[i]:
+    for i, code_line in enumerate(instructions):
+        if not code_line:
                 continue
         
-        instruction: str = instructions[i].strip()
+        instruction: str = code_line.strip()
 
         if  instruction.startswith(";"):
             continue
@@ -112,3 +121,5 @@ def lexer(instructions: list[str], instruction_set: list[str]) -> list[Token]:
                 raise ValueError(f"The given opcode {opcode} is not part of the valid instruction set.")
 
     return token_lst
+
+from Token import Token
