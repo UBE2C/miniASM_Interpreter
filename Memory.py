@@ -51,7 +51,7 @@ class Memory:
         if len(self.occupied_addresses) == 0:
             return f"\n< Virtual memory (vRAM) with {self.size} cells ({self.size/1048576} MB). >\n"
         else:
-            return f"\n< Virtual memory (vRAM) with {self.size} cells ({self.size/1048576} MB). >\n< The following addresses are occupied {self.occupied_addresses} >\n"
+            return f"\n< Virtual memory (vRAM) with {self.size} cells ({self.size/1048576} MB). >\n< The following addresses are occupied or reserved {self.occupied_addresses} >\n"
 
     def __repr__(self) -> str:
         return self.__str__()
