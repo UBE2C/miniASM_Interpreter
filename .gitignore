@@ -1,3 +1,5 @@
 #--- Micromamba env ---#
 y
+
+#--- Compiled python bytecode ---#
 __pycache__
