@@ -1124,6 +1124,17 @@ for key in register_list:
 
 
 
+from Alu import Alu
+
+#This will be a function inside the VM to initialize the connection between the components
+def initialize_connections(self) -> str:
+    self.Registers.vRAM: Memory = vRAM
+    self.Registers.Alu: Alu = ALU
+    self.vRAM.register_supervisor: RegisterSupervisor = Registers
+    self.ALU.register_supervisor: RegisterSupervisor = Registers
+
+    return f"Each component has been successfully connected to one another."
+
 
 
 """ Managed register setup:
@@ -1137,7 +1148,7 @@ class Register:
         self.bytes: bytearray =  bytearray(size)
         self.data_type: str = "Empty"
         self.value: int | float | str | bool = self.read_value()
-        
+
 
     def __str__(self) -> str:
         return f"< Register {self.name}, capacity: {self.limit} bytes, value: {self.bytes}, value type: {self.data_type}>"
@@ -1330,6 +1341,10 @@ class RegisterSupervisor:
         self.register_group: dict[str, Register] = {}
         self.group_size: int = 0
         self.register_byte_limit: int = 8
+
+        #Connection to the other components 
+        self.vRAM: Memory = None
+        self.ALU: Alu = None
         
     def __str__(self) -> str:
         return f"< RegisterSupervisor which supervises a group of {len(self.register_group)} registers. >"
@@ -1396,6 +1411,13 @@ class RegisterSupervisor:
 
         return f"All register has been reset to {bytearray(self.register_byte_limit)}, Empty."
 
+    def dstore(src_register: str, var_name: str) -> Pointer:
+        self.vRAM.dynamic_store(var_name = var_name, src_register = self.register_group.get(src), obj_type = self.register_group.get(src).data_type)
+
+    def store(src_register: str, var_name: str, adrs: int) -> Pointer:
+        self.vRAM.store(var_name = var_name, obj = self.register_group.get(src_register), obj_type = self.register_group.get(src).data_type, adrs = self.register_group.get("mar").read_value())    
+
+
 
 
 """ Integration test for the Memory and the registers"""
@@ -1444,6 +1466,9 @@ class Memory:
         self.vram: bytearray = bytearray(size)
         self.pointer_list: dict[str, Pointer] = {}
         self.occupied_addresses: list[int] = []
+
+        #Connection to the other components 
+        self.register_supervisor: RegisterSupervisor = None
 
     def __str__(self) -> str:
         if len(self.occupied_addresses) == 0:
@@ -1552,8 +1577,8 @@ class Memory:
 
         return byte_buffer, element_offsets
             
-
-    def store(self, var_name: str, obj: int | float | str | list[int | float | str], obj_type: str, adrs: int) -> Pointer:
+    """Static storage function in order to store register values in the vRAM one by one in the available memory (variables) - can be called by the RegisterSupervisor class"""
+    def store(self, var_name: str, obj: int | float | str | list[int | float | str] | Register, obj_type: str, adrs: int) -> Pointer:
         if adrs < 0 or adrs > self.size:
             raise vRAMError(f"store: The supplied memory address is out of bounds: address {adrs}, vRAM addresses: {0} to {len(self.vram)}")
         
@@ -1669,7 +1694,8 @@ class Memory:
 
         return ptr
 
-    def dynamic_store(self, var_name: str, source: Register, obj_type: str) -> Pointer:
+    """Dynamic storage function in order to store register values from a loop/function into a reserved memory region (array) - can be called by the RegisterSupervisor class"""
+    def dynamic_store(self, var_name: str, src_register: Register, obj_type: str) -> Pointer:
         if var_name not in self.pointer_list.keys() and self.pointer_list[var_name].var_type != "reserved":
             raise vRAMError(f"dynamic_store: the variable {var_name} cannot be allocated as no memory was reserved for it.")
 
@@ -1681,11 +1707,11 @@ class Memory:
         current_write_window: int = self.pointer_list.get(var_name).write_window_start
 
         
-        transfer_buffer = source.read_bytes()
+        transfer_buffer = self.register_supervisor.register_group.get(src_register).read_bytes()
         offset = len(transfer_buffer)
 
         if current_write_window + offset > block_end:
-            raise vRAMError(f"dynamic store: the next current element form register {source.name} would exceed the length capacity of the reserved memory block.")
+            raise vRAMError(f"dynamic store: the next current element form register {src_register.name} would exceed the length capacity of the reserved memory block.")
             
         self.vram[current_write_window : current_write_window + offset] = transfer_buffer
         self.pointer_list.get(var_name).write_window_start = current_write_window + offset

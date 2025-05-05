@@ -150,7 +150,7 @@ class Memory:
 
         return byte_buffer, element_offsets
             
-
+    """Static storage function in order to store register values in the vRAM one by one in the available memory (variables) - can be called by the RegisterSupervisor class"""
     def store(self, var_name: str, obj: int | float | str | list[int | float | str], obj_type: str, adrs: int) -> Pointer:
         if adrs < 0 or adrs > self.size:
             raise vRAMError(f"store: The supplied memory address is out of bounds: address {adrs}, vRAM addresses: {0} to {len(self.vram)}")
@@ -266,7 +266,8 @@ class Memory:
         ptr: Pointer = self.pointer_list.get(block_name)
 
         return ptr
-
+        
+    """Dynamic storage function in order to store register values from a loop/function into a reserved memory region (array) - can be called by the RegisterSupervisor class"""
     def dynamic_store(self, var_name: str, source: Register, obj_type: str) -> Pointer:
         if var_name not in self.pointer_list.keys() and self.pointer_list[var_name].var_type != "reserved":
             raise vRAMError(f"dynamic_store: the variable {var_name} cannot be allocated as no memory was reserved for it.")
