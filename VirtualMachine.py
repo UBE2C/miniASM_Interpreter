@@ -50,7 +50,7 @@ class VirtualMachine:
         
         
     def __str__(self) -> str:
-        return f"Program:\n< {len(self.preprocessed_code)} lines,\n{len(self.token_list)} tokens,\n{len(self.instruction_list)} instructions,\n{len(self.register_table)} registers >"
+        return f"\n< Program: >\n< {len(self.preprocessed_code)} lines >\n< {len(self.token_list)} tokens >\n< {len(self.instruction_list)} instructions >\n< {len(self.Registers.list_registers())} registers >"
     
     def __repr__(self) -> str:
         return self.__str__()
