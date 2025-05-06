@@ -1,6 +1,6 @@
 
 from __future__ import annotations
-import array
+
 import struct
 from typing import override
 
@@ -260,6 +260,8 @@ class Memory:
                                                     adrs = adrs,
                                                     length = obj_len,
                                                     element_offsets = element_positions)
+                    self.pointer_list[var_name].indexer(offset_lst = self.pointer_list[var_name].element_offsets)
+
                     
             elif isinstance(obj, (str)) and (obj_type == "char" or obj_type == "string"):
                 buffer: bytearray | bytes = obj.encode(encoding = "iso-8859-2")
@@ -277,7 +279,7 @@ class Memory:
                 
             
             ptr: "Pointer" = self.pointer_list[var_name]
-
+            
             self.check_occupied()
             return ptr
             
@@ -448,7 +450,27 @@ class Memory:
     
         return return_buffer, data_type
 
-    
+    def load_index(self, var_name: str, var_index: int) -> tuple[bytearray, str]:
+        block_start: int = self.pointer_list[var_name].adrs
+        block_end: int = block_start + self.pointer_list[var_name].length
+        
+        element_index: list[int] = self.pointer_list[var_name].element_indexes[var_index]
+        return_buffer: bytearray = self.vram[element_index[0] : element_index[1]]
+        
+        if self.pointer_list[var_name].var_type == "iarray":
+            element_type: str = "int"
+
+        elif self.pointer_list[var_name].var_type == "farray":
+            element_type: str = "float"
+
+        else:
+            element_type: str = "char"
+
+        return return_buffer, element_type
+
+    def load_address(adrs:int) -> bytes | bytearray:
+        
+
 
 from Registers import Register
 from Registers import RegisterSupervisor

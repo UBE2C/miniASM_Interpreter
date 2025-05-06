@@ -278,7 +278,7 @@ class RegisterSupervisor:
     def store(self, src_register: str, var_name: str) -> "Pointer":
         self.vRAM.store(var_name = var_name, obj = self.read_register_value(src_register)[0] , obj_type = self.read_register_value(src_register)[1], adrs = self.read_register_value("mar")[0])
 
-    def load_variable(self, )
+   
 
 
 from Memory import Pointer
