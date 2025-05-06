@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import struct
+from typing import override
 
 from Custom_errors import AluError
+
 
 class Alu:
     def __init__(self) -> None:  
@@ -12,6 +14,8 @@ class Alu:
         self.last_op: str = ""
         self.last_output: bytearray = bytearray()
         self.last_output_type: str = ""
+        
+        self.register_supervisor: "RegisterSupervisor | None" = None
 
         
         self.numeric_operations: set[str] = {"add", "sub", "mul", "idiv", "fdiv", "mod", "inc", "dec"}
@@ -19,13 +23,15 @@ class Alu:
         self.logical_operations_out: set[str] = {"eq", "neq", "gt", "ge", "lt", "le"}
         self.bitwise_operations_out: set[str] = {"and", "or", "xor", "not", "ls", "rs"}
 
+    @override
     def __str__(self) -> str:
         return f"< ALU: last operation {self.last_op} with an output {self.last_output} of type {self.last_output_type} >"
     
+    @override
     def __repr__(self) -> str:
         return self.__str__()
     
-    def byte_to_numeric(self, var: bytearray, var_type: str) -> int | float:
+    def byte_to_numeric(self, var: bytearray, var_type: str) -> tuple[int | float]:
         if var_type == "int":
             if len(var) == 1: #8 bits, little-endian
                 frm: str = "<b"
@@ -59,7 +65,7 @@ class Alu:
         else:
             raise AluError(f"byte_to_numeric: expecting type {int | float}, got type {var_type}.")
 
-    def numeric_to_byte(self, var: int | float, var_type: str) -> bytearray:
+    def numeric_to_byte(self, var: int | float, var_type: str) -> bytearray | bytes:
         if var_type == "int" and not isinstance(var, (int)):
             raise AluError(f"numeric_to_byte: expected an int based on {var_type}, but {type(var)} was supplied.")
         
@@ -101,4 +107,4 @@ class Alu:
 
 
         
-    
+from Registers import RegisterSupervisor

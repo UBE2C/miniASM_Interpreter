@@ -1,3 +1,6 @@
+#----- Import base packages -----#
+from typing import override
+
 #----- Import custom classes -----#
 from Token import Token
 from Instruction import Instruction
@@ -21,12 +24,12 @@ from code_executor import code_executor
 class VirtualMachine:
     INSTRUCTION_SET: list[str] = ["mov", "inc", "dec", "add", "sub", "mul", "div", "fdiv", ":", "jmp",
                                  "cmp", "jne", "je", "jge", "jg", "jle", "jl", "call", "ret", "str", "ldr",
-                                 "msg", ";", "end"]
+                                 "fre", "frea", "str", "dstr", "msg", ";", "end"]
     
-    def __init__(self, code) -> None:
+    def __init__(self, code: str) -> None:
         self.code: str = code
         self.instruction_set: list[str] = self.INSTRUCTION_SET
-        self.preprocessed_code = self.code.split("\n")
+        self.preprocessed_code: list[str] = self.code.split("\n")
         self.token_list: list[Token] = []
         self.instruction_list: list[Instruction] = []
         self.jump_table: dict[str, int] = {}
@@ -42,16 +45,17 @@ class VirtualMachine:
     
     def initialize_connections(self) -> str:
         self.Registers.vRAM = self.vRAM
-        self.Registers.Alu = self.ALU
+        self.Registers.ALU = self.ALU
         self.vRAM.register_supervisor = self.Registers
         self.ALU.register_supervisor = self.Registers
 
         return f"Each component has been successfully connected to one another."
         
-        
+    @override
     def __str__(self) -> str:
         return f"\n< Program: >\n< {len(self.preprocessed_code)} lines >\n< {len(self.token_list)} tokens >\n< {len(self.instruction_list)} instructions >\n< {len(self.Registers.list_registers())} registers >"
     
+    @override
     def __repr__(self) -> str:
         return self.__str__()
     
