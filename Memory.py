@@ -8,6 +8,7 @@ from Custom_errors import vRAMError
 
 
 class Pointer:
+    """A Pointer class responsible for representing selected memory blocks as variables and facilitating access to given blocks."""
     def __init__(self, var_name: str, var_type: str, adrs: int, length: int, element_offsets: list[int] | None = None) -> None:
         self.var_name: str = var_name
         self.var_type: str = var_type
@@ -30,6 +31,7 @@ class Pointer:
         return self.__str__()
     
     def indexer(self, offset_lst: list[int]) -> list[list[int]]:
+        """Creates slice-indexes for each element in a memory block/variable"""
         indexes: list[list[int]] = []
         previous: int = self.adrs
         for offset in offset_lst:
@@ -41,6 +43,7 @@ class Pointer:
 
 
 class Memory:
+    """A Memory class responsible for representing vRAM in the miniAssembly VirtualMachine"""
     def __init__(self, size: int = 1048576) -> None:
         self.size: int = size
         self.vram: bytearray = bytearray(size)
@@ -50,6 +53,7 @@ class Memory:
         #Connection to the other components 
         self.register_supervisor: "RegisterSupervisor | None" = None
 
+
     @override
     def __str__(self) -> str:
         if len(self.occupied_addresses) == 0:
@@ -57,14 +61,18 @@ class Memory:
         else:
             return f"\n< Virtual memory (vRAM) with {self.size} cells ({self.size/1048576} MB). >\n< The following addresses are occupied or reserved {self.occupied_addresses} >\n"
 
+
     @override
     def __repr__(self) -> str:
         return self.__str__()
 
+
     def view_vRAM(self) -> bytearray:
         return self.vram
 
+
     def check_occupied(self) -> None:
+        """Checks occupied memory regions and updates the connected attribute"""
         output_lst: list[list[int]] = []
         if len(self.pointer_list) != 0:
             for key in self.pointer_list.keys():
@@ -72,16 +80,21 @@ class Memory:
         
         self.occupied_addresses = output_lst
 
+
     def view_section(self, ptr: str) -> str:
+        """Views a memory block via it's assigned pointer"""
         section_start: int = self.pointer_list[ptr].adrs
         section_end: int = section_start + self.pointer_list[ptr].length
         
         return f"{self.vram[section_start:section_end]}"
     
+
     def view_pointer(self, ptr_name: str) -> "Pointer":
         return self.pointer_list[ptr_name]
     
+
     def numeric_to_byte(self, var: int | float, var_type: str) -> bytearray | bytes:
+        """Converts standalone numeric data (ints and floats) to bytes"""
         if var_type == "int" and not isinstance(var, (int)):
             raise vRAMError(f"numeric_to_byte: expected an int based on {var_type}, but {type(var)} was supplied.")
         
@@ -123,7 +136,9 @@ class Memory:
 
         raise vRAMError("numeric_to_byte: Unexpected code path reached.")
 
+
     def array_to_byte(self, obj: list[int | float], array_type: str) -> tuple[bytearray, list[int]]:
+        """Converts arrayed numeric data into a bytearray"""
         byte_object: bytearray | bytes = bytearray()
         byte_buffer: bytearray | bytes = bytearray()
         element_offsets: list[int] = []
@@ -167,7 +182,9 @@ class Memory:
 
         return byte_buffer, element_offsets
 
+
     def byte_to_numeric(self, var: bytearray | bytes, var_type: str) -> int | float:
+        """Converts bytes and bytearrays into numeric data"""
         if var_type == "int":
             if len(var) == 1: #8 bits, little-endian
                 frm: str = "<b"
@@ -201,7 +218,9 @@ class Memory:
         else:
             raise vRAMError(f"byte_to_numeric: expecting type {int | float}, got type {var_type}.")
 
+
     def byte_to_array(self, var_name: str) -> list[int | float]:
+        """Converts a bytearray to an array of numeric data"""
         block_start: int = self.pointer_list[var_name].adrs
         block_end: int = block_start + self.pointer_list[var_name].length
         buffer: bytearray = self.vram[block_start : block_end]
@@ -219,16 +238,19 @@ class Memory:
 
         return array_out
 
+
     def bytes_to_char_string(self, var: bytearray | bytes, var_type: str) -> str:
+        """Converts bytes or a bytearray to character or string data"""
         value_out: str = ""
 
         if isinstance(var, (bytearray, bytes)) and var_type in {"char", "string"}:
             value_out: str = var.decode(encoding = "iso-8859-2")
 
         return value_out
-            
-    """Static storage function in order to store register values in the vRAM one by one in the available memory (variables) - can be called by the RegisterSupervisor class"""
+
+
     def store(self, var_name: str, obj: int | float | str | list[int | float] | "Register", obj_type: str, adrs: int) -> "Pointer":
+        """Static storage function in order to store register values in the vRAM one by one in the available memory (variables) - can be called by the RegisterSupervisor class"""
         if adrs < 0 or adrs > self.size:
             raise vRAMError(f"store: The supplied memory address is out of bounds: address {adrs}, vRAM addresses: {0} to {len(self.vram)}")
         
@@ -282,8 +304,10 @@ class Memory:
             
             self.check_occupied()
             return ptr
-            
+
+
     def reserve_over_limit(self, size: int, block_name: str) -> "Pointer":
+        """Allocates and reserves additional memory for the vRAM and creates a null pointer"""
         if size <= 0:
             raise vRAMError(f"reserve_extra: the size of the extra block must be positive and larger than 0 bytes, {size} were provided.")
         
@@ -303,7 +327,9 @@ class Memory:
 
         return ptr
 
+
     def reserve(self, size: int, adrs: int, block_name: str, overwrite: bool = False) -> "Pointer":
+        """Reserves a block of existing memory as a variable and creates a null pointer"""
         if size <= 0:
             raise vRAMError(f"reserve: the size of the reserved block must be positive and larger than 0 bytes, {size} were provided.")
 
@@ -332,8 +358,9 @@ class Memory:
 
         return ptr
 
-    """Dynamic storage function in order to store register values from a loop/function into a reserved memory region (array) - can be called by the RegisterSupervisor class"""
+
     def dynamic_store(self, var_name: str, src_register: str, obj_type: str) -> "Pointer":
+        """Dynamic storage function in order to store register values from a loop/function into a reserved memory region (array) - can be called by the RegisterSupervisor class"""
         if var_name not in self.pointer_list.keys() and self.pointer_list[var_name].var_type != "reserved":
             raise vRAMError(f"dynamic_store: the variable {var_name} cannot be allocated as no memory was reserved for it.")
 
@@ -370,7 +397,9 @@ class Memory:
 
         return ptr
 
+
     def write_reserved(self, var_name: str, obj: int | float | str | list[int | float], obj_type: str) -> "Pointer":
+        """Writes data into an existing and reserved memory block/variable and initializes the connected null pointer"""
         if var_name in self.pointer_list.keys() and self.pointer_list[var_name].var_type == "reserved":
             if isinstance(obj, (int, float)) and obj_type in ("int", "float"):
                 buffer: bytearray | bytes = self.numeric_to_byte(var = obj, var_type = obj_type)
@@ -422,7 +451,9 @@ class Memory:
         self.check_occupied()
         return self.pointer_list[var_name]
 
+
     def free_region(self, var_name: str) -> "Pointer":
+        """Returns a memory block/variable belonging to the selected pointer by setting it to 0 and removes the associated pointer"""
         block_start: int = self.pointer_list[var_name].adrs
         block_end: int = block_start + self.pointer_list[var_name].length
         length: int = self.pointer_list[var_name].length
@@ -433,7 +464,9 @@ class Memory:
         
         return ptr
 
+
     def free_all(self) -> None:
+        """Returns all allocated and occupied memory to the vRAM by setting them to 0 and removing all pointers"""
         self.vram: bytearray = bytearray(self.size)
 
         self.pointer_list.clear()
@@ -441,7 +474,9 @@ class Memory:
 
         print(f"free_all: The total vRAM has been freed, each cell has been reset to 0 and all pointers were dropped.")
 
+
     def load_variable(self, var_name: str) -> tuple[bytearray , str]:
+        """Retrieves a memory block/variable from the memory - can be called by the RegisterSupervisor"""
         block_start: int = self.pointer_list[var_name].adrs
         block_end: int = block_start + self.pointer_list[var_name].length
 
@@ -450,7 +485,9 @@ class Memory:
     
         return return_buffer, data_type
 
+
     def load_index(self, var_name: str, var_index: int) -> tuple[bytearray, str]:
+        """Retrieves elements of a selected memory block/variable via its pointer - can be called by the RegisterSupervisor"""
         block_start: int = self.pointer_list[var_name].adrs
         block_end: int = block_start + self.pointer_list[var_name].length
         
@@ -468,7 +505,12 @@ class Memory:
 
         return return_buffer, element_type
 
-    def load_address(adrs:int) -> bytes | bytearray:
+
+    def load_address(self, adrs:int) -> int:
+        """Retrieves a single memory cell/variable from the memory - can be called by the RegisterSupervisor"""
+        return_buffer: int = self.vram[adrs]
+
+        return return_buffer
         
 
 

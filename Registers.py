@@ -7,6 +7,7 @@ from Custom_errors import RegisterError
 
 
 class Register:
+    """A Register class responsible for representing individual registers in the miniAssembly VirtualMachine"""
     def __init__(self, name: str, size: int = 8) -> None:
         self.name: str = name
         self.limit: int = size
@@ -14,16 +15,19 @@ class Register:
         self.data_type: str = "Empty"
         self.value: int | float | str | bool = self.read_value()
 
+
     @override
     def __str__(self) -> str:
         return f"\n< Register {self.name} >\n< capacity: {self.limit} bytes >\n< value: {self.bytes} >\n< value type: {self.data_type} >\n"
     
+
     @override
     def __repr__(self) -> str:
         return self.__str__()
 
 
     def numeric_to_byte(self, var: int | float, var_type: str) -> bytearray | bytes:
+        """Converts standalone numeric data (ints and floats) to bytes"""
         if var_type == "int" and not isinstance(var, (int)):
             raise RegisterError(f"numeric_to_byte: expected an int based on {var_type}, but {type(var)} was supplied.")
         
@@ -65,7 +69,9 @@ class Register:
 
         raise RegisterError("numeric_to_byte: Unexpected code path reached.")
 
+
     def boolean_to_byte(self, var: bool, var_type: str) -> bytearray | bytes:
+        """Converts boolean values to bytes"""
         buffer_out: bytearray | bytes = bytes()
 
         if isinstance(var, (bool)) and var_type == "bool":
@@ -73,7 +79,9 @@ class Register:
 
         return buffer_out
     
+
     def char_string_to_bytes(self, var: str, var_type: str) -> bytearray | bytes:
+        """Converts characters or strings to bytes or byte arrays"""
         buffer_out: bytearray | bytes = bytes()
 
         if isinstance(var, (str)) and var_type in {"char", "string"}:
@@ -83,6 +91,7 @@ class Register:
 
 
     def byte_to_numeric(self, var: bytearray | bytes, var_type: str) -> int | float:
+        """Converts bytes and bytes into numeric data"""
         if var_type == "int":
             if len(var) == 1: #8 bits, little-endian
                 frm: str = "<b"
@@ -116,7 +125,9 @@ class Register:
         else:
             raise RegisterError(f"byte_to_numeric: expecting type {int | float}, got type {var_type}.")
         
+
     def bytes_to_boolean(self, var: bytearray | bytes, var_type: str) -> bool:
+        """Converts bytes into boolean values"""
         value_out: bool = False
 
         if isinstance(var, (bytearray)) and var_type == "bool":
@@ -124,7 +135,9 @@ class Register:
 
         return value_out
     
+
     def bytes_to_char_string(self, var: bytearray | bytes, var_type: str) -> str:
+        """Converts bytes into boolean values"""
         value_out: str = ""
 
         if isinstance(var, (bytearray, bytes)) and var_type in {"char", "string"}:
@@ -134,10 +147,12 @@ class Register:
 
 
     def read_bytes(self) -> bytearray | bytes:
+        """Returns the bytestring/bytes (max 8 bytes) stored by the register"""
         return self.bytes
     
 
     def read_value(self) -> int | float | str | bool:
+        """Returns the numeric/character/boolean value represented by the stored bytes in the register"""
         value_out_numeric: int | float = 0
         value_out_str: str = ""
         value_out_bool: bool = False
@@ -160,7 +175,9 @@ class Register:
         
         raise RegisterError("read_value: Unexpected code path reached.")
 
+
     def write(self, value: int | float | str | bool | bytes | bytearray, value_type: str) -> None:
+        """Writes the bytes representation of the numeric/character/boolean value into the register"""
         byte_buffer: bytearray | bytes = bytearray(self.limit)
 
         if isinstance(value, (int, float)) and value_type in {"int", "float"}:
@@ -201,13 +218,17 @@ class Register:
 
         self.value = self.read_value()
 
+
     def reset_register(self) -> None:
+        """Resets the stored bytes in the register to 0"""
         self.bytes = bytearray(self.limit)
         self.data_type = "Empty"
 
         self.value = self.read_value()
 
+
 class RegisterSupervisor:
+    """A Supervisor class responsible for creating and managing the individual registers in the miniAssembly VirtualMachine"""
     def __init__(self) -> None:
         self.register_group: dict[str, "Register"] = {}
         self.group_size: int = 0
@@ -216,16 +237,20 @@ class RegisterSupervisor:
         #Connection to the other components 
         self.vRAM: "Memory | None" = None
         self.ALU: "Alu | None" = None
-    
+
+
     @override
     def __str__(self) -> str:
         return f"\n< RegisterSupervisor which supervises a group of {len(self.register_group)} registers. >\n"
+
 
     @override
     def __repr__(self) -> str:
         return self.__str__()
 
+
     def create_register_group(self, register_name_base: str = "rx", register_size: int = 8, group_size: int = 16) -> str:
+        """Creates the registers to be managed by the Supervisor"""
         self.register_group = {f"{register_name_base}{i}" : Register(name = f"{register_name_base}{i}", size = register_size) for i in range(group_size)}
         self.register_group.update({"mar" : Register(name = "mar", size = register_size)})
 
@@ -233,11 +258,15 @@ class RegisterSupervisor:
         self.register_byte_limit = register_size
 
         return f"A register group of {group_size + 2} registers, from {register_name_base}0 to {register_name_base}{group_size - 1} were created with additional MAR and MDR registers."
-        
+
+
     def list_registers(self) -> list[str]:
+        """Returns a list containing the names of the managed registers"""
         return list(self.register_group.keys())
+
     
     def copy_register_bytes(self, dest_register: str, src_register: str) -> None:
+        """Transfers the bytes representation of a value from one register to another inside the managed group"""
         transfer_buffer: bytearray | bytes = bytearray()
         source_type: str = ""
         
@@ -246,39 +275,85 @@ class RegisterSupervisor:
             
         self.register_group[dest_register].write(value = transfer_buffer, value_type = source_type)
 
+
     def write_register(self, target_register: str, value: int | float | str | bool, value_type: str) -> None:
+        """Invokes the write function of a managed register to write the bytes representation of a numeric/character/boolean value into a managed register"""
         self.register_group[target_register].write(value = value, value_type = value_type)
 
+
     def read_register_bytes(self, target_register: str) -> tuple[bytearray | bytes, str]:
+        """Retrieves the bytes representation of a numeric/character/boolean value stored in a managed register"""
         bytearray_out: bytearray | bytes = self.register_group[target_register].bytes
         data_type_out: str = self.register_group[target_register].data_type
         
         return bytearray_out, data_type_out
-    
+
+
     def read_register_value(self, target_register: str) -> tuple[int | float | str | bool, str]:
+        """Retrieves the value representation of the bytes stored in a managed register"""
         value_out: int | float | str | bool = self.register_group[target_register].value
         data_type_out: str = self.register_group[target_register].data_type
 
         return value_out, data_type_out
-    
+
+
     def reset_register(self, target_register: str) -> str:
+        """Resets a managed register's bytes to 0"""
         self.register_group[target_register].reset_register()
 
         return f"Register {self.register_group[target_register].name}, has been reset to {self.read_register_bytes(target_register)}"
-    
+
+
     def reset_all_registers(self) -> str:
+        """Resets all managed register's bytes to 0"""
         for key in self.register_group:
             self.register_group[key].reset_register()
 
         return f"All register has been reset to {bytearray(self.register_byte_limit)}, Empty."
 
+
     def dstore(self, src_register: str, var_name: str) -> "Pointer":
+        """Invokes the dynamic_store method of the Memory class in order to dynamically allocate (pack) values into a reserved memory block/variable represented by the chosen pointer.
+        Can be used in an iterative retrieval process"""
         self.vRAM.dynamic_store(var_name = var_name, src_register = src_register, obj_type = self.register_group[src_register].data_type)
 
+
     def store(self, src_register: str, var_name: str) -> "Pointer":
+        """Invokes the store method of the Memory class in order to allocate values into a new memory block/variable and to create the associated pointer.
+        IMPORTANT: address selection happens through the Memory Address Register (mar), so mov the desired address into the register first before calling store"""
         self.vRAM.store(var_name = var_name, obj = self.read_register_value(src_register)[0] , obj_type = self.read_register_value(src_register)[1], adrs = self.read_register_value("mar")[0])
 
-   
+
+    def load_ind(self, dest_register: str, var_name: str, element_index: int) -> None:
+        """Invokes the load_index method of the Memory class in order to retrieve a value from a memory block/array. Can be used in an iterative retrieval process"""
+        transfer_buffer: bytearray = bytearray()
+        data_type: str = ""
+
+        transfer_buffer, data_type = self.vRAM.load_index(var_name = var_name, var_index = element_index)
+        
+        self.register_group[dest_register].write(value = transfer_buffer, value_type = data_type)
+
+    def load_adrs(self, dest_register: str, source_adrs: int) -> None:
+        """Invokes the load_address method of the Memory class in order to retrieve a value from a single memory address (8 bit cell).
+        WARNING: the address can be any address, meaning that if sliced into a value larger than 8 bits (e.g.: a 32 bit int or a float)
+        the retrieved 8 bit int will not represent that variable."""
+        transfer_value: int = self.vRAM.load_address(source_adrs)
+        
+        self.register_group[dest_register].write(value = transfer_value, value_type = "int")
+
+    
+    def load_var(self, dest_register: str, var_name: str) -> None:
+        """Invokes the load_variable method of the Memory class in order to retrieve a memory block/variable/array.
+        WARNING: if the retrieved variable/block is larger than 64 bits (8 bytes) the value will be over the limit of the registers.
+        A recommended usage is to retrieve individual variables or small strings/arrays rather than their larger counterparts."""
+        transfer_buffer: bytearray = bytearray()
+        data_type: str = ""
+
+        transfer_buffer, data_type = self.vRAM.load_variable(var_name = var_name)
+
+        self.register_group[dest_register].write(value = transfer_buffer, value_type = data_type)
+
+
 
 
 from Memory import Pointer
