@@ -1879,8 +1879,8 @@ class AU:
         return twoC_string
 
     
-    def is_input_negative(self, input_int: int) -> bool:
-        sign_mask: int = (1<<63)
+    def is_input_negative(self, input_int: int, bit_len: int = 64) -> bool:
+        sign_mask: int = (1 << (bit_len - 1))
         output: bool = False
 
         if (input_int & sign_mask) != 0:
@@ -2044,7 +2044,7 @@ class AU:
             if bit_index == (bit_len - 1):
                 msb_in = carry_over
             
-            new_bit, carry_over = self.full_adder(input_a = int(i_1[bit_index]), input_b = int(i_2[bit_index]), carry_in = carry_over)
+            new_bit, carry_over = self.full_adder(input_a = i_1[bit_index], input_b = i_2[bit_index], carry_in = carry_over)
 
             new_seq.append(new_bit)
 
