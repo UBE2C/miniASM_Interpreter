@@ -1950,6 +1950,17 @@ class AU:
             
 
     def int_to_bits(self, input_int: int, bit_len: int = 64) -> list[int]:
+        """
+        Convert an integer to its binary representation as a list of bits.
+    
+        Args:
+            input_int: The integer to convert
+            bit_len: The bit width to use (default: 64)
+        
+        Returns:
+            A list of bits, with least significant bit first
+        """
+        
         width_mask: int = (1 << bit_len) -1
         bit_seq: list[int] = []
 
@@ -1961,6 +1972,16 @@ class AU:
         return bit_seq
     
     def bit_to_int(self, input_bits: list[int]) -> int:
+        """
+        Convert a list of bits to an integer.
+    
+        Args:
+            input_bits: The bit list to convert
+        
+        Returns:
+            The integer value represented by the bit list.
+        """
+        
         bit_string: int = 0
 
         for i, bit in enumerate(input_bits):
