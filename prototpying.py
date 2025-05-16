@@ -1,5 +1,5 @@
 import struct
-from Custom_errors import RegisterError
+from Custom_errors import AluError, RegisterError
 
 class Memory:
     def __init__(self, size: int = 256) -> None:
@@ -1792,3 +1792,136 @@ class Memory:
 
         self.check_occupied()
         return self.pointer_list[var_name]
+
+
+
+
+from Custom_errors import AluError
+class SumSub:
+    def __init__(self) -> None:
+        result: int = 0
+        carry_out: int = 0
+        carry: int = 0
+
+    def full_adder(self, input_a: int = 0, input_b: int = 0, carry_in: int = 0) -> tuple[int, int]:
+        carry: int = carry_in
+        carry_out: int = 0
+
+        bit_sum: int = (input_a ^ input_b) ^ carry
+        
+        if input_a & input_b:
+            carry_out = 1
+
+        elif (input_a | input_b) & carry:
+            carry_out = 1
+
+        else:
+            carry_out = 0
+
+        return bit_sum, carry_out
+
+
+    def twos_complement(self, num: int) -> str:
+        bitstring: str = format((num & 0xFFFFFFFFFFFFFFFF), "064b")
+        complement_string: str = ""
+        twoC_string: str = ""
+        carry_over: int = 0
+
+        for bit in bitstring:
+            if bit == "0":
+                complement_string += "1"
+            else:
+                complement_string += "0"
+
+        for i, bit in enumerate(complement_string[:: -1]):
+            new_bit: int = 0
+            
+            if i == 0:
+                new_bit, carry_over = self.full_adder(input_a=int(bit), carry_in=1)
+                twoC_string += str(new_bit)
+
+            else:
+                
+                new_bit, carry_over = self.full_adder(input_a=int(bit), carry_in=carry_over)
+                twoC_string += str(new_bit)
+
+        twoC_string = twoC_string[:: -1]
+
+        return twoC_string
+
+    def overflow_detection(self, int_1: int, int_2:int, result: int) -> bool:
+        sign_mask: int = (1<<63)
+        output: bool = False
+
+        i_1_sign: bool = (int_1 & sign_mask) != 0
+        i_2_sign: bool = (int_2 & sign_mask) != 0
+        res_sign: bool = (result & sign_mask) != 0
+
+        if (i_1_sign == i_2_sign) and (res_sign != i_1_sign):
+            output = True
+
+        return  output
+
+    def is_input_negative(self, input_int: int) -> bool:
+        sign_mask: int = (1<<63)
+        output: bool = False
+
+        if (input_int & sign_mask) != 0:
+            output = True
+
+        return  output
+
+    def add_ints(self, int_1: int, int_2:int) -> int:
+        i_1: str = format((int_1 & 0xFFFFFFFFFFFFFFFF), "064b")[:: -1] #Flip the bit string for the proper looping
+        i_2: str = format((int_2 & 0xFFFFFFFFFFFFFFFF), "064b")[:: -1] #Flip the bit string for the proper looping
+        carry_over: int = 0
+        output: int = 0
+
+
+        for bit_index in range(64):
+            new_bit: int = 0
+            
+            new_bit, carry_over = self.full_adder(input_a = int(i_1[bit_index]), input_b = int(i_2[bit_index]), carry_in = carry_over)
+
+            mask: int = new_bit << bit_index
+            output = output | mask
+
+        if self.overflow_detection(int_1 = int_1, int_2 = int_2, result = output):
+            raise AluError(message="add_ints: overflow detected at the end of int addition")
+
+        #Interpret 'result' as a two's‑complement value in 'width' bits, and return it as a Python signed int.
+        if self.is_input_negative(input_int = int_1) and self.is_input_negative(input_int = output):
+            output = output - (1 << 64) #this will shift back a two's complement integer into the proper python representation
+
+        return output
+
+    def sub_ints(self, int_1: int, int_2:int) -> int:
+        i_1: str = format((int_1 & 0xFFFFFFFFFFFFFFFF), "064b")[:: -1] #Flip the bit string for the proper looping
+        i_2: str = self.twos_complement(num = int_2)[:: -1]
+
+        carry_over: int = 0
+        output: int = 0
+
+
+        for bit_index in range(64):
+            new_bit: int = 0
+            
+            new_bit, carry_over = self.full_adder(input_a = int(i_1[bit_index]), input_b = int(i_2[bit_index]), carry_in = carry_over)
+
+            mask: int = new_bit << bit_index
+            output = output | mask
+
+        if self.overflow_detection(int_1 = int_1, int_2 = int_2, result = output):
+            raise AluError(message="sub_ints: overflow detected at the end of int addition")
+
+        #Interpret 'result' as a two's‑complement value in 'width' bits, and return it as a Python signed int.
+        if self.is_input_negative(input_int = int_1) and self.is_input_negative(input_int = output):
+            output = output - (1 << 64) #this will shift back a two's complement integer into the proper python representation
+
+        return output
+            
+
+
+
+        
+
