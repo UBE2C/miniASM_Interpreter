@@ -1,5 +1,6 @@
 #----- Import base packages -----#
 from typing import override
+import struct
 
 #----- Import custom classes -----#
 from Token import Token
@@ -61,7 +62,7 @@ class VirtualMachine:
     
     
     def lex(self) -> None:
-        self.token_list = lexer(instructions = self.preprocessed_code, instruction_set = self.instruction_set)
+        self.token_list = lexer(instructions = self.preprocessed_code, instruction_set = self.instruction_set, register_names=self.Registers.ret_register_names())
 
     def parse(self) -> None:
         self.instruction_list, self.jump_table = parser(token_list = self.token_list)
