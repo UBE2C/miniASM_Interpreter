@@ -182,7 +182,9 @@ msg  '(5+1)/2 = ', rx0 , 'and reg2 char = ', rx2, 'and reg3 str = ', rx3    ; ou
 end
 
 function:
-    div  rx, 2
+    add  rx0, 3
+    sub  rx0, 3
+    div  rx0, 2
     ret
 """
 
@@ -2079,3 +2081,63 @@ class AU:
             output = output - (1 << 64) #this will shift back a two's complement integer into the proper python representation
 
         return output
+    
+
+    #ADD and SUB should have 3 args: dest, operand1, operand2 (tpyes: register, register/int, register/int)
+    def add(self, dest: str, operand_1: str | int, operand_2: str | int, op1_type: str, op2_type:str) -> None:
+        """Invokes the add_int function from the AU subunit and the read_register_bytes method from the RegisterSupervisor if one of the operands in a register.
+        to add the provided operands. The function accepts int and char types, where the value will be the integer representation of a character, to allow
+        character transformations.
+        
+        The function returns none as it directly writes the sum of the operands, into the destination register where the return type is determined
+        by te type of the first operand."""
+        
+        op1_buffer: bytes | bytearray = bytes()
+        op2_buffer: bytes | bytearray = bytes()
+        op1_buffer_type: str = ""
+        op2_buffer_type: str = ""
+
+        op1_int_value: int = 0
+        op2_int_value: int = 0
+
+        operation_result: int = 0
+        dest_buffer: bytes | bytearray = bytes()
+        dest_type: str = ""
+
+        if not isinstance(dest, (str)) or dest not in self.register_supervisor.ret_register_names():
+            raise AluError(f"iadd: the destination argument must be the name of a valid register, {dest} was given.")
+
+        if isinstance(operand_1, (str)) and op1_type == "register":
+            op1_buffer, op1_buffer_type = self.register_supervisor.read_register_bytes(operand_1)
+            op1_int_value = self.byte_to_numeric(var = op1_buffer, var_type = "int")[0]
+
+            if op1_buffer_type not in {"int", "char"}:
+                raise AluError(f"iadd: int addition can only be performed on int and integer representation of char classes, {op1_buffer_type} was provided.")
+        
+        elif isinstance(operand_1, (int)) and op1_type == "int":
+            op1_int_value = operand_1
+            op1_buffer_type = "int"
+
+        else:
+            raise AluError(f"iadd: expected type 'register' or 'int' as an operand, {op1_type} was provided.")
+
+        if isinstance(operand_2, (str)) and op2_type == "register":
+            op2_buffer, op2_buffer_type = self.register_supervisor.read_register_bytes(operand_2)
+            op2_int_value = self.byte_to_numeric(var = op2_buffer, var_type = "int")[0]
+
+            if op2_buffer_type not in {"int", "char"}:
+                raise AluError(f"iadd: int addition can only be performed on int and integer representation of char classes, {op2_buffer_type} was provided.")
+        
+        elif isinstance(operand_2, (int)) and op2_type == "int":
+            op2_int_value = operand_2
+            op2_buffer_type = "int"
+
+        else:
+            raise AluError(f"iadd: expected type 'register' or 'int' as an operand, {op2_type} was provided.")
+        
+        
+        operation_result = self.AU.add_ints(int_1 = op1_int_value, int_2 = op2_int_value, bit_len = 64)
+        dest_buffer = self.numeric_to_byte(var = operation_result, var_type = "int")
+        dest_type = op1_buffer_type
+
+        self.register_supervisor.write_register(target_register = dest, value = dest_buffer, value_type = dest_type)
