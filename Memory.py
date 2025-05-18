@@ -44,14 +44,14 @@ class Pointer:
 
 class Memory:
     """A Memory class responsible for representing vRAM in the miniAssembly VirtualMachine"""
-    def __init__(self, size: int = 1048576) -> None:
+    def __init__(self, size: int = 1048576, register_supervisor: "RegisterSupervisor | None" = None) -> None:
         self.size: int = size
         self.vram: bytearray = bytearray(size)
         self.pointer_list: dict[str, "Pointer"] = {}
         self.occupied_addresses: list[list[int]] = []
 
         #Connection to the other components 
-        self.register_supervisor: "RegisterSupervisor | None" = None
+        self.register_supervisor: "RegisterSupervisor | None" = register_supervisor
 
 
     @override

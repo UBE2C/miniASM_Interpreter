@@ -229,14 +229,14 @@ class Register:
 
 class RegisterSupervisor:
     """A Supervisor class responsible for creating and managing the individual registers in the miniAssembly VirtualMachine"""
-    def __init__(self) -> None:
+    def __init__(self, vRAM: "Memory | None" = None, ALU: "Alu | None" = None) -> None:
         self.register_group: dict[str, "Register"] = {}
         self.group_size: int = 0
         self.register_byte_limit: int = 8
         
         #Connection to the other components 
-        self.vRAM: "Memory | None" = None
-        self.ALU: "Alu | None" = None
+        self.vRAM: "Memory | None" = vRAM
+        self.ALU: "Alu | None" = ALU
 
 
     @override
@@ -247,7 +247,9 @@ class RegisterSupervisor:
     @override
     def __repr__(self) -> str:
         return self.__str__()
-
+    
+    def ret_register_names(self) -> set[str]:
+        return set(self.register_group.keys())
 
     def create_register_group(self, register_name_base: str = "rx", register_size: int = 8, group_size: int = 16) -> str:
         """Creates the registers to be managed by the Supervisor"""
