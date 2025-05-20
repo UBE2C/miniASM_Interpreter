@@ -2141,3 +2141,158 @@ class AU:
         dest_type = op1_buffer_type
 
         self.register_supervisor.write_register(target_register = dest, value = dest_buffer, value_type = dest_type)
+
+
+
+
+
+#floating point binary single precision - 32 bits
+float_bin: str = "01000001100011010000000000000000"
+
+def binary_to_float(fpn_bit_string: str, bit_len: int = 32) -> float:
+    sing_bit_string: str = ""
+    exponent_string: str = ""
+    mantiassa_string: str = ""
+    output_num: float = 0
+
+    if bit_len == 32 and len(fpn_bit_string) != 32:
+        raise ValueError(f"float_to_decimal: the given floating point bit string was expected to be of length 32, {len(fpn_bit_string)} was given.")
+    
+    elif bit_len == 64 and len(fpn_bit_string) != 64:
+        raise ValueError(f"float_to_decimal: the given floating point bit string was expected to be of length 64, {len(fpn_bit_string)} was given.")
+    
+    sing_bit_string = fpn_bit_string[0]
+    if bit_len == 32:
+        exponent_string = fpn_bit_string[1:9]
+        mantiassa_string = fpn_bit_string[9:len(fpn_bit_string)]
+        exp_offset: int = 127
+    
+    elif bit_len == 64:
+        exponent_string = fpn_bit_string[1:12]
+        mantiassa_string = fpn_bit_string[12:len(fpn_bit_string)]
+        exp_offset: int = 1023
+
+
+    sing_bit: int = int(sing_bit_string)
+    
+    mantissa: float = float()
+    for bit_index, bit in enumerate(mantiassa_string):
+        mantissa += int(bit) * (2 ** (-bit_index - 1))
+    
+    exponent: int = int('0b' + exponent_string, 2)
+
+    #Calculations with special cases
+    if exponent == 0 and mantissa == 0: #the case of a 0
+        output_num = 0.0
+    elif exponent == 0 and mantissa != 0: #the case of very small numbers (subnormal numbers)
+        output_num = (-1) ** sing_bit * (0 + mantissa) * (2 ** (1 - exp_offset))
+    elif all(bit == '1' for bit in exponent_string) and mantissa == 0: #the case of a too large number = overflows
+        if sing_bit == 0:
+            return float('Inf')
+        elif sing_bit == 1:
+            return float('-Inf')
+    elif all(bit == '1' for bit in exponent_string) and mantissa != 0: #the case of results of invalid or undefined mathematical operations
+        return float('NaN')
+    else: # Normal case
+        output_num = (-1) ** sing_bit * (1 + mantissa) * (2 ** (exponent - exp_offset))
+
+    return output_num
+
+##UNFINISHED and BUGGY
+def float_to_binary(num: float, bit_len: int = 32) -> str:
+    """
+    Convert a floating point number to binary representation in IEEE 754 format.
+    
+    Args:
+        num: Float number to convert
+        bit_len: Bit length (32 for single precision, 64 for double precision)
+        
+    Returns:
+        String representation of the binary number
+    """
+
+    full_int: int = int(num)
+    fraction: float = num - full_int
+    sing_bit: str = ""
+    output_bin_string: str = ""
+
+    if num < 0:
+        sing_bit = "1"
+    
+    else:
+        sing_bit = "0"
+
+    # Single precision (32-bit)
+    if bit_len == 32:
+        # Convert integer part to binary (without format prefix)
+        full_bin: str = format(full_int, 'b')
+        
+        fraction_bin: str = ""
+        iter: int = 0
+        fraction_mult: float = fraction
+        while fraction_mult != 0 and iter < 23:
+            fraction_mult *= 2
+            bit: int = int(fraction_mult)
+            fraction_bin += str(bit)
+            fraction_mult -= bit
+            iter += 1
+
+        
+        if len(fraction_bin) < 23:
+            padding: str = "".join("0" for _ in range(23 - len(fraction_bin)))
+            fraction_bin += padding
+
+        exponent: int = 0
+        if full_int == 0:
+            exponent = 0  # handle zero specially
+            full_bin = '0'
+        else:
+            exponent = len(full_bin) - 1
+
+        full_exponent: int = exponent + 127
+        full_exponent_bin: str = format(full_exponent, '08b')
+        mantissa: str = full_exponent_bin[8-exponent:] + fraction_bin
+
+        output_bin_string = sing_bit + full_exponent_bin + mantissa
+
+        if len(output_bin_string) != 32:
+            raise BufferError(f"float_to_binary: the output bit len was expected to be 32, {len(output_bin_string)} was received")
+
+    elif bit_len == 64:
+        full_bin: str = format(full_int, 'b')
+        
+        fraction_bin: str = ""
+        iter: int = 0
+        fraction_mult: float = fraction
+        while fraction_mult != 0 and iter < 52:
+            fraction_mult *= 2
+            bit: int = int(fraction_mult)
+            fraction_bin += str(bit)
+            fraction_mult -= bit
+            iter += 1
+
+        
+        if len(fraction_bin) < 52:
+            padding: str = "".join("0" for _ in range(52 - len(fraction_bin)))
+            fraction_bin += padding
+
+        exponent: int = 0
+        for i in range(len(full_bin)):
+            if full_bin[i] == "1":
+                exponent = 11 - (i +1)
+
+        full_exponent: int = exponent + 1023
+        full_exponent_bin: str = format(full_exponent, '011b')
+        mantissa: str = full_exponent_bin[11-exponent:] + fraction_bin
+
+        output_bin_string = sing_bit + full_exponent_bin + mantissa
+
+        if len(output_bin_string) != 64:
+            raise BufferError(f"float_to_binary: the output bit len was expected to be 64, {len(output_bin_string)} was received")
+
+    else:
+        raise ValueError(f"float_to_bin: 32 or 64 was expected for bit_len, {bit_len} was provided.")
+    
+    return output_bin_string
+    
+    

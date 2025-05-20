@@ -168,7 +168,7 @@ class AU:
             new_seq.append(new_bit)
 
         if msb_in != carry_over:
-            raise AluError(message="sub_ints: overflow detected at the end of int addition")
+            raise AluError(message="sub_ints: overflow detected at the end of int subtraction")
         
         output = self.bit_to_int(new_seq)
 
