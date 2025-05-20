@@ -2148,6 +2148,7 @@ class AU:
 
 #floating point binary single precision - 32 bits
 float_bin: str = "01000001100011010000000000000000"
+import math
 
 def binary_to_float(fpn_bit_string: str, bit_len: int = 32) -> float:
     sing_bit_string: str = ""
@@ -2211,88 +2212,90 @@ def float_to_binary(num: float, bit_len: int = 32) -> str:
         String representation of the binary number
     """
 
-    full_int: int = int(num)
-    fraction: float = num - full_int
-    sing_bit: str = ""
+    whole_part: int = int(num)
+    fraction_part: float = num - whole_part
+    sign_bit: str = ""
     output_bin_string: str = ""
 
-    if num < 0:
-        sing_bit = "1"
-    
-    else:
-        sing_bit = "0"
-
-    # Single precision (32-bit)
     if bit_len == 32:
-        # Convert integer part to binary (without format prefix)
-        full_bin: str = format(full_int, 'b')
-        
-        fraction_bin: str = ""
-        iter: int = 0
-        fraction_mult: float = fraction
-        while fraction_mult != 0 and iter < 23:
-            fraction_mult *= 2
-            bit: int = int(fraction_mult)
-            fraction_bin += str(bit)
-            fraction_mult -= bit
-            iter += 1
-
-        
-        if len(fraction_bin) < 23:
-            padding: str = "".join("0" for _ in range(23 - len(fraction_bin)))
-            fraction_bin += padding
-
-        exponent: int = 0
-        if full_int == 0:
-            exponent = 0  # handle zero specially
-            full_bin = '0'
-        else:
-            exponent = len(full_bin) - 1
-
-        full_exponent: int = exponent + 127
-        full_exponent_bin: str = format(full_exponent, '08b')
-        mantissa: str = full_exponent_bin[8-exponent:] + fraction_bin
-
-        output_bin_string = sing_bit + full_exponent_bin + mantissa
-
-        if len(output_bin_string) != 32:
-            raise BufferError(f"float_to_binary: the output bit len was expected to be 32, {len(output_bin_string)} was received")
+        exp_len: int = 8
+        mant_len: int = 23
+        exp_bias: int = 127
+        exp_format: str = '08b'
 
     elif bit_len == 64:
-        full_bin: str = format(full_int, 'b')
-        
-        fraction_bin: str = ""
-        iter: int = 0
-        fraction_mult: float = fraction
-        while fraction_mult != 0 and iter < 52:
-            fraction_mult *= 2
-            bit: int = int(fraction_mult)
-            fraction_bin += str(bit)
-            fraction_mult -= bit
-            iter += 1
-
-        
-        if len(fraction_bin) < 52:
-            padding: str = "".join("0" for _ in range(52 - len(fraction_bin)))
-            fraction_bin += padding
-
-        exponent: int = 0
-        for i in range(len(full_bin)):
-            if full_bin[i] == "1":
-                exponent = 11 - (i +1)
-
-        full_exponent: int = exponent + 1023
-        full_exponent_bin: str = format(full_exponent, '011b')
-        mantissa: str = full_exponent_bin[11-exponent:] + fraction_bin
-
-        output_bin_string = sing_bit + full_exponent_bin + mantissa
-
-        if len(output_bin_string) != 64:
-            raise BufferError(f"float_to_binary: the output bit len was expected to be 64, {len(output_bin_string)} was received")
-
-    else:
-        raise ValueError(f"float_to_bin: 32 or 64 was expected for bit_len, {bit_len} was provided.")
+        exp_len: int = 11
+        mant_len: int = 52
+        exp_bias: int = 1023
+        exp_format: str = '011b'
     
+    else:
+        raise ValueError(f"float_to_binary: Unsupported bit length, 32 or 64 expected, {bit_len} given.")
+
+
+    if num < 0:
+        sign_bit = "1"
+    else:
+        sign_bit = "0"
+
+    #Handle the 0.0 case
+    if num == 0.0:
+        return sign_bit + "0" * (bit_len -1)
+
+    #Handle NaN:
+    #Take advantage of a unique property of NaN: it's the only value that is not equal to itself. According to IEEE 754:
+    #For any normal number x, x == x is always true
+    #For NaN, NaN == NaN is always false
+    if num != num:
+        return sign_bit + ('1' * exp_len) + '1' + ('0' * (mant_len - 1))
+
+    #Handle infinity
+    #Take advantage of a fundamental property of IEEE 754 floating-point arithmetic:
+    #For any normal number x: x * 0 = 0
+    #For infinity: infinity * 0 = NaN (not 0)
+    if math.isinf(num):
+        return sign_bit + ('1' * exp_len) + ('0' * mant_len)
+
+
+    wholeP_bin: str = format(whole_part, 'b')
+    fractionP_bin: str = ""
+
+    exponent: int = 0
+    if abs(num) < 2**(1-exp_bias):
+        biased_exponent: int = exponent 
+    
+    else:
+        exponent = len(wholeP_bin) - 1
+        biased_exponent: int = exponent + exp_bias
+    
+    biased_exp_bin: str = format(biased_exponent, exp_format)
+        
+    fraction_mult: float = fraction_part
+    while fraction_mult != 0 and ((len(wholeP_bin) - 1) + len(fractionP_bin)) < mant_len:
+        fraction_mult *= 2
+        bit: int = int(fraction_mult)
+        fractionP_bin += str(bit)
+        fraction_mult -= bit
+
+    if fraction_part > 0 and fractionP_bin.find("1") == -1:
+        raise BufferError(f"float_to_binary: the given number {num} cannot be represented with single precision")
+
+    if abs(num) < 2**(1-exp_bias):
+        mantissa: str = fractionP_bin.ljust(mant_len, '0')
+    
+    else:
+        mantissa: str = wholeP_bin[1:] + fractionP_bin
+
+    if len(mantissa) < mant_len:
+        padding: str = "".join("0" for _ in range(mant_len - len(mantissa)))
+        mantissa += padding
+
+    output_bin_string = sign_bit + biased_exp_bin + mantissa
+
+    if len(output_bin_string) != bit_len:
+       raise BufferError(f"float_to_binary: the output bit len was expected to be {bit_len}, {len(output_bin_string)} was received")
+   
+
     return output_bin_string
     
     
