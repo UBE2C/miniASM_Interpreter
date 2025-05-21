@@ -2211,7 +2211,7 @@ def float_to_binary(num: float, bit_len: int = 32) -> str:
     Returns:
         String representation of the binary number
     """
-
+    abs_num: float = abs(num)
     whole_part: int = int(num)
     fraction_part: float = num - whole_part
     sign_bit: str = ""
@@ -2221,12 +2221,14 @@ def float_to_binary(num: float, bit_len: int = 32) -> str:
         exp_len: int = 8
         mant_len: int = 23
         exp_bias: int = 127
+        min_exp: int = -149
         exp_format: str = '08b'
 
     elif bit_len == 64:
         exp_len: int = 11
         mant_len: int = 52
         exp_bias: int = 1023
+        min_exp: int = -1074
         exp_format: str = '011b'
     
     else:
@@ -2257,30 +2259,43 @@ def float_to_binary(num: float, bit_len: int = 32) -> str:
         return sign_bit + ('1' * exp_len) + ('0' * mant_len)
 
 
-    wholeP_bin: str = format(whole_part, 'b')
+    wholeP_bin: str = format(abs(whole_part), 'b')
     fractionP_bin: str = ""
 
     exponent: int = 0
-    if abs(num) < 2**(1-exp_bias):
-        biased_exponent: int = exponent 
+    if abs_num < 2**(1-exp_bias): #for subnormal numbers the exponent field is supposed to be all 0s
+        biased_exponent: int = 0 
     
     else:
-        exponent = len(wholeP_bin) - 1
+        exponent: int = math.floor(math.log2(abs_num))
         biased_exponent: int = exponent + exp_bias
+
+    if exponent > exp_bias:
+        raise BufferError(f"float_to_binary: overflow detected.")
+    elif exponent < min_exp:
+        raise BufferError(f"float_to_binary: underflow detected.")
     
     biased_exp_bin: str = format(biased_exponent, exp_format)
         
-    fraction_mult: float = fraction_part
-    while fraction_mult != 0 and ((len(wholeP_bin) - 1) + len(fractionP_bin)) < mant_len:
-        fraction_mult *= 2
-        bit: int = int(fraction_mult)
-        fractionP_bin += str(bit)
-        fraction_mult -= bit
+    fraction_mult: float = abs(fraction_part)
+    if abs_num < 2**(1-exp_bias):
+        while fraction_mult != 0 and len(fractionP_bin) < mant_len:
+            fraction_mult *= 2
+            bit: int = int(fraction_mult)
+            fractionP_bin += str(bit)
+            fraction_mult -= bit
+    
+    else:
+        while fraction_mult != 0 and ((len(wholeP_bin) - 1) + len(fractionP_bin)) < mant_len:
+            fraction_mult *= 2
+            bit: int = int(fraction_mult)
+            fractionP_bin += str(bit)
+            fraction_mult -= bit
 
     if fraction_part > 0 and fractionP_bin.find("1") == -1:
         raise BufferError(f"float_to_binary: the given number {num} cannot be represented with single precision")
 
-    if abs(num) < 2**(1-exp_bias):
+    if abs_num < 2**(1-exp_bias):
         mantissa: str = fractionP_bin.ljust(mant_len, '0')
     
     else:
