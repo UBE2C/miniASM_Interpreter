@@ -2414,28 +2414,28 @@ def binary_to_float(fpn_bit_string: str, bit_len: int = 32) -> float:
     
     sing_bit_string: str = ""
     exponent_string: str = ""
-    mantiassa_string: str = ""
+    mantissa_string: str = ""
     output_num: float = 0
     
     sing_bit_string = fpn_bit_string[0]
     if bit_len == 32:
         exponent_string = fpn_bit_string[1:9]
-        mantiassa_string = fpn_bit_string[9:len(fpn_bit_string)]
+        mantissa_string = fpn_bit_string[9:len(fpn_bit_string)]
         exp_offset: int = 127
     
     elif bit_len == 64:
         exponent_string = fpn_bit_string[1:12]
-        mantiassa_string = fpn_bit_string[12:len(fpn_bit_string)]
+        mantissa_string = fpn_bit_string[12:len(fpn_bit_string)]
         exp_offset: int = 1023
     
     else:
-        raise ValueError(f"float_to_decimal: Unsupported bit length, 32 or 64 expected, {bit_len} given.")
+        raise ValueError(f"binary_to_float: Unsupported bit length, 32 or 64 expected, {bit_len} given.")
 
 
     sing_bit: int = int(sing_bit_string)
     
     mantissa: float = float()
-    for bit_index, bit in enumerate(mantiassa_string):
+    for bit_index, bit in enumerate(mantissa_string):
         mantissa += int(bit) * (2 ** (-bit_index - 1))
     
     exponent: int = int('0b' + exponent_string, 2)
@@ -2702,6 +2702,13 @@ def float_to_binary(num: float, bit_len: int = 32) -> str:
         biased_exponent: int = 0 #for subnormal numbers the exponent field is supposed to be all 0s
 
         #fraction for subnormal numbers
+        # ─────────────────────────────────────────────────────────────────────────────
+        # For IEEE-754 subnormals the stored value is:
+        #     abs_num = (0.b1b2…bₘ)₂ × 2^(1−bias)
+        # so to extract the pure fraction bits 0.b1b2… we divide out 2^(1−bias),
+        # i.e. multiply by 2^(bias−1).  The binary “.xxxxx…” expansion of that
+        # product yields exactly the mantissa bits for the subnormal case.
+        # ─────────────────────────────────────────────────────────────────────────────
         scaled_fraction: float = abs_num * (2 ** (exp_bias - 1))
         while scaled_fraction != 0 and len(subnorm_bin) < (mant_len + extension_bit_number):
             scaled_fraction *= 2

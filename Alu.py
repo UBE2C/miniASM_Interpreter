@@ -53,6 +53,17 @@ class AU:
 
 
     def is_input_negative(self, input_int: int, bit_len: int = 64) -> bool:
+        """
+        Separates the sign bit and checks if the number is negative or positive.
+    
+        Args:
+            input_int: The integer to check
+            bit_len: The bit width to use (default: 64)
+        
+        Returns:
+            A boolean value, True if the number is negative, False if positive.
+        """
+
         sign_mask: int = (1 << (bit_len - 1))
         output: bool = False
 
@@ -105,6 +116,16 @@ class AU:
 
     
     def twos_complement(self, num: int) -> list[int]:
+        """
+        Converts a number to it's two's complement representation.
+    
+        Args:
+            num: An integer to convert
+        
+        Returns:
+            A two's complement bit list representation of the given number.
+        """
+
         bit_seq: list[int] = self.int_to_bits(input_int = num)
         complement_seq: list[int] = []
         twoC_seq: list[int] = []
