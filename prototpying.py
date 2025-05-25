@@ -2147,59 +2147,132 @@ class AU:
 
 
 #floating point binary single precision - 32 bits
-float_bin: str = "01000001100011010000000000000000"
-import math
-
-def binary_to_float(fpn_bit_string: str, bit_len: int = 32) -> float:
-    sing_bit_string: str = ""
-    exponent_string: str = ""
-    mantiassa_string: str = ""
-    output_num: float = 0
-
-    if bit_len == 32 and len(fpn_bit_string) != 32:
-        raise ValueError(f"float_to_decimal: the given floating point bit string was expected to be of length 32, {len(fpn_bit_string)} was given.")
-    
-    elif bit_len == 64 and len(fpn_bit_string) != 64:
-        raise ValueError(f"float_to_decimal: the given floating point bit string was expected to be of length 64, {len(fpn_bit_string)} was given.")
-    
-    sing_bit_string = fpn_bit_string[0]
-    if bit_len == 32:
-        exponent_string = fpn_bit_string[1:9]
-        mantiassa_string = fpn_bit_string[9:len(fpn_bit_string)]
-        exp_offset: int = 127
-    
-    elif bit_len == 64:
-        exponent_string = fpn_bit_string[1:12]
-        mantiassa_string = fpn_bit_string[12:len(fpn_bit_string)]
-        exp_offset: int = 1023
-
-
-    sing_bit: int = int(sing_bit_string)
-    
-    mantissa: float = float()
-    for bit_index, bit in enumerate(mantiassa_string):
-        mantissa += int(bit) * (2 ** (-bit_index - 1))
-    
-    exponent: int = int('0b' + exponent_string, 2)
-
-    #Calculations with special cases
-    if exponent == 0 and mantissa == 0: #the case of a 0
-        output_num = 0.0
-    elif exponent == 0 and mantissa != 0: #the case of very small numbers (subnormal numbers)
-        output_num = (-1) ** sing_bit * (0 + mantissa) * (2 ** (1 - exp_offset))
-    elif all(bit == '1' for bit in exponent_string) and mantissa == 0: #the case of a too large number = overflows
-        if sing_bit == 0:
-            return float('Inf')
-        elif sing_bit == 1:
-            return float('-Inf')
-    elif all(bit == '1' for bit in exponent_string) and mantissa != 0: #the case of results of invalid or undefined mathematical operations
-        return float('NaN')
-    else: # Normal case
-        output_num = (-1) ** sing_bit * (1 + mantissa) * (2 ** (exponent - exp_offset))
-
-    return output_num
-
 ##UNFINISHED and BUGGY
+
+def float_to_binary(num: float, bit_len: int = 32) -> str:
+    """
+    Convert a floating point number to binary representation in IEEE 754 format.
+    
+    Args:
+        num: Float number to convert
+        bit_len: Bit length (32 for single precision, 64 for double precision)
+        
+    Returns:
+        String representation of the binary number
+    """
+    abs_num: float = abs(num)
+    whole_part: int = int(num)
+    fraction_part: float = num - whole_part
+    sign_bit: str = ""
+    output_bin_string: str = ""
+    extension_bit_number: int = 5
+    rounding_bits: str = ""
+
+    if bit_len == 32:
+        exp_len: int = 8
+        mant_len: int = 23 
+        exp_bias: int = 127
+        min_exp: int = -149
+        exp_format: str = '08b'
+
+    elif bit_len == 64:
+        exp_len: int = 11
+        mant_len: int = 52
+        exp_bias: int = 1023
+        min_exp: int = -1074
+        exp_format: str = '011b'
+    
+    else:
+        raise ValueError(f"float_to_binary: Unsupported bit length, 32 or 64 expected, {bit_len} given.")
+
+
+    if num < 0:
+        sign_bit = "1"
+    else:
+        sign_bit = "0"
+
+    #Handle the 0.0 case
+    if num == 0.0:
+        return sign_bit + "0" * (bit_len -1)
+
+    #Handle NaN:
+    #Take advantage of a unique property of NaN: it's the only value that is not equal to itself. According to IEEE 754:
+    #For any normal number x, x == x is always true
+    #For NaN, NaN == NaN is always false
+    if num != num:
+        return sign_bit + ('1' * exp_len) + '1' + ('0' * (mant_len - 1))
+
+    #Handle infinity
+    #Take advantage of a fundamental property of IEEE 754 floating-point arithmetic:
+    #For any normal number x: x * 0 = 0
+    #For infinity: infinity * 0 = NaN (not 0)
+    if math.isinf(num):
+        return sign_bit + ('1' * exp_len) + ('0' * mant_len)
+
+
+    wholeP_bin: str = format(abs(whole_part), 'b')
+    fractionP_bin: str = ""
+
+    exponent: int = 0
+    if abs_num < 2**(1-exp_bias): #for subnormal numbers the exponent field is supposed to be all 0s
+        biased_exponent: int = 0 
+    
+    else:
+        exponent: int = math.floor(math.log2(abs_num))
+        biased_exponent: int = exponent + exp_bias
+
+    if exponent > exp_bias:
+        raise BufferError(f"float_to_binary: overflow detected.")
+    elif exponent < min_exp:
+        raise BufferError(f"float_to_binary: underflow detected.")
+    
+    biased_exp_bin: str = format(biased_exponent, exp_format)
+        
+    fraction_mult: float = abs(fraction_part)
+    if abs_num < 2**(1-exp_bias): #fraction for subnormal numbers
+        while fraction_mult != 0 and len(fractionP_bin) < (mant_len + extension_bit_number):
+            fraction_mult *= 2
+            bit: int = int(fraction_mult)
+            fractionP_bin += str(bit)
+            fraction_mult -= bit
+    
+    else: #fraction for normal numbers
+        while fraction_mult != 0 and ((len(wholeP_bin) - 1) + len(fractionP_bin)) < (mant_len + extension_bit_number):
+            fraction_mult *= 2
+            bit: int = int(fraction_mult)
+            fractionP_bin += str(bit)
+            fraction_mult -= bit
+
+    if fraction_part > 0 and fractionP_bin.find("1") == -1:
+        raise BufferError(f"float_to_binary: the given number {num} cannot be represented with single precision")
+
+    if abs_num < 2**(1-exp_bias):
+        mantissa: str = fractionP_bin.ljust(mant_len, '0')
+    
+    else:
+        mantissa: str = wholeP_bin[1:] + fractionP_bin
+
+    if len(mantissa) < mant_len:
+        padding: str = "".join("0" for _ in range(mant_len - len(mantissa)))
+        mantissa += padding
+    
+    elif len(mantissa) > mant_len:
+        rounding_bits = mantissa[mant_len:]
+        mantissa = mantissa[0 : mant_len]
+
+        biased_exp_bin, mantissa = float_rounder(exponent = biased_exp_bin, mantissa = mantissa, rounding_bits= rounding_bits)
+        
+
+    output_bin_string = sign_bit + biased_exp_bin + mantissa
+
+    if len(output_bin_string) != bit_len:
+       raise BufferError(f"float_to_binary: the output bit len was expected to be {bit_len}, {len(output_bin_string)} was received")
+   
+
+    return output_bin_string
+
+
+
 def float_to_binary(num: float, bit_len: int = 32) -> str:
     """
     Convert a floating point number to binary representation in IEEE 754 format.
@@ -2278,14 +2351,14 @@ def float_to_binary(num: float, bit_len: int = 32) -> str:
     biased_exp_bin: str = format(biased_exponent, exp_format)
         
     fraction_mult: float = abs(fraction_part)
-    if abs_num < 2**(1-exp_bias):
+    if abs_num < 2**(1-exp_bias): #fraction for subnormal numbers
         while fraction_mult != 0 and len(fractionP_bin) < mant_len:
             fraction_mult *= 2
             bit: int = int(fraction_mult)
             fractionP_bin += str(bit)
             fraction_mult -= bit
     
-    else:
+    else: #fraction for normal numbers
         while fraction_mult != 0 and ((len(wholeP_bin) - 1) + len(fractionP_bin)) < mant_len:
             fraction_mult *= 2
             bit: int = int(fraction_mult)
@@ -2313,4 +2386,377 @@ def float_to_binary(num: float, bit_len: int = 32) -> str:
 
     return output_bin_string
     
+
+
+
+float_bin: str = "01000001100011010000000000000000"
+import math
+
+def binary_to_float(fpn_bit_string: str, bit_len: int = 32) -> float:
+    """
+    Convert IEEE 754 binary representation back to a floating point number.
     
+    Handles all IEEE 754 cases including:
+    - Normal numbers with implicit leading 1
+    - Subnormal numbers (denormalized) 
+    - Special values: +/-0, +/-infinity, NaN
+    
+    Args:
+        fpn_bit_string: Binary string representation of the float
+        bit_len: Bit length (32 for single precision, 64 for double precision)
+        
+    Returns:
+        Reconstructed floating point number
+        
+    Raises:
+        ValueError: If bit_len is not 32 or 64
+    """
+    
+    sing_bit_string: str = ""
+    exponent_string: str = ""
+    mantiassa_string: str = ""
+    output_num: float = 0
+    
+    sing_bit_string = fpn_bit_string[0]
+    if bit_len == 32:
+        exponent_string = fpn_bit_string[1:9]
+        mantiassa_string = fpn_bit_string[9:len(fpn_bit_string)]
+        exp_offset: int = 127
+    
+    elif bit_len == 64:
+        exponent_string = fpn_bit_string[1:12]
+        mantiassa_string = fpn_bit_string[12:len(fpn_bit_string)]
+        exp_offset: int = 1023
+    
+    else:
+        raise ValueError(f"float_to_decimal: Unsupported bit length, 32 or 64 expected, {bit_len} given.")
+
+
+    sing_bit: int = int(sing_bit_string)
+    
+    mantissa: float = float()
+    for bit_index, bit in enumerate(mantiassa_string):
+        mantissa += int(bit) * (2 ** (-bit_index - 1))
+    
+    exponent: int = int('0b' + exponent_string, 2)
+
+    #Calculations with special cases
+    if exponent == 0 and mantissa == 0: #the case of a 0
+        output_num = 0.0
+    elif exponent == 0 and mantissa != 0: #the case of very small numbers (subnormal numbers)
+        output_num = (-1) ** sing_bit * (0 + mantissa) * (2 ** (1 - exp_offset))
+    elif all(bit == '1' for bit in exponent_string) and mantissa == 0: #the case of a too large number = overflows
+        if sing_bit == 0:
+            return float('Inf')
+        elif sing_bit == 1:
+            return float('-Inf')
+    elif all(bit == '1' for bit in exponent_string) and mantissa != 0: #the case of results of invalid or undefined mathematical operations
+        return float('NaN')
+    else: # Normal case
+        output_num = (-1) ** sing_bit * (1 + mantissa) * (2 ** (exponent - exp_offset))
+
+    return output_num
+
+
+def full_adder(input_a: int = 0, input_b: int = 0, carry_in: int = 0) -> tuple[int, int]:
+    """
+    Hardware-level 1-bit full adder implementation.
+    
+    Performs binary addition of two single bits plus a carry input,
+    producing a sum bit and carry output. This mimics actual CPU
+    arithmetic logic unit (ALU) behavior.
+    
+    Args:
+        input_a: First input bit (0 or 1)
+        input_b: Second input bit (0 or 1) 
+        carry_in: Carry input from previous bit position (0 or 1)
+        
+    Returns:
+        tuple[int, int]: (sum_bit, carry_out)
+    """
+    
+    carry: int = carry_in
+    carry_out: int = 0
+
+    bit_sum: int = (input_a ^ input_b) ^ carry
+        
+    if input_a & input_b:
+        carry_out = 1
+
+    elif (input_a | input_b) & carry:
+        carry_out = 1
+
+    else:
+        carry_out = 0
+
+    return bit_sum, carry_out
+
+
+def float_rounder(exponent: str, mantissa: str, rounding_bits: str) -> tuple[str, str]:
+    """
+    IEEE 754 compliant rounding using Guard, Round, and Sticky bits.
+    
+    Implements "round to nearest, ties to even" (banker's rounding):
+    - If guard bit = 0: truncate (no rounding)
+    - If guard bit = 1:
+        - If round = 0 and sticky = 0: round to even (check LSB of mantissa)
+        - If round = 1 or sticky = 1: always round up
+    
+    The rounding may cause mantissa overflow, requiring exponent increment.
+    Uses hardware-level full adder for bit-accurate arithmetic operations.
+    
+    Args:
+        exponent: Binary string of the biased exponent
+        mantissa: Binary string of the mantissa (without implicit leading bit)
+        rounding_bits: Extra precision bits beyond mantissa (guard + round + sticky bits)
+        
+    Returns:
+        tuple[str, str]: (rounded_exponent, rounded_mantissa)
+    """
+    
+    mantissa_lst: list[int] = [int(bit) for bit in mantissa]
+    mantissa_lst.reverse() #reversed for bitwise operations!
+
+    exponent_lst: list[int] = [int(bit) for bit in exponent]
+    exponent_lst.reverse() #reversed for bitwise operations!
+
+    sticky_bits_lst: list[int] = [int(bit) for bit in rounding_bits[2:]]
+    guard_bit: int = int(rounding_bits[0])
+    rounding_bit: int = int(rounding_bits[1])
+    
+    sticky_bit: int = 0
+    for bit in sticky_bits_lst:
+        sticky_bit = sticky_bit | int(bit)
+    
+    carry_over: int = 0
+
+    rounded_mantissa: list[int] = []
+    rounded_exponent: list[int] = []
+    
+    rounded_exponent_out: str = ""
+    rounded_mantissa_out: str = ""
+
+    if guard_bit == 0: #guard bit (g)
+        return exponent, mantissa
+    
+    elif guard_bit == 1 and rounding_bit == 0 and sticky_bit == 0:
+        if mantissa_lst[0] == 0:
+            return exponent, mantissa
+        
+        else:
+            for bit_index, bit in enumerate(mantissa_lst):
+                new_bit: int = 0
+
+                if bit_index == 0:
+                    new_bit, carry_over = full_adder(input_a = bit, carry_in = 1)
+                    rounded_mantissa.append(new_bit)
+                    
+                else:
+                    new_bit, carry_over = full_adder(input_a = bit, carry_in = carry_over)
+                    rounded_mantissa.append(new_bit)
+
+            if carry_over == 0:
+                rounded_mantissa.reverse()
+
+                rounded_mantissa_out = ''.join(str(bit) for bit in rounded_mantissa)
+                return exponent, rounded_mantissa_out
+
+            else:
+                for bit_index, bit in enumerate(exponent_lst):
+                    new_bit: int = 0
+
+                    if bit_index == 0:
+                        new_bit, carry_over = full_adder(input_a = bit, carry_in = 1)
+                        rounded_exponent.append(new_bit)
+                        
+                    else:
+                        new_bit, carry_over = full_adder(input_a = bit, carry_in = carry_over)
+                        rounded_exponent.append(new_bit)
+
+                rounded_exponent.reverse()
+                rounded_mantissa.reverse()
+
+                rounded_exponent_out = ''.join(str(bit) for bit in rounded_exponent)
+                rounded_mantissa_out = ''.join(str(bit) for bit in rounded_mantissa)
+
+                return rounded_exponent_out, rounded_mantissa_out
+
+    elif guard_bit == 1 and (rounding_bit == 1 or sticky_bit == 1):
+        for bit_index, bit in enumerate(mantissa_lst):
+            new_bit: int = 0
+
+            if bit_index == 0:
+                new_bit, carry_over = full_adder(input_a = bit, carry_in = 1)
+                rounded_mantissa.append(new_bit)
+                    
+            else:
+                new_bit, carry_over = full_adder(input_a = bit, carry_in = carry_over)
+                rounded_mantissa.append(new_bit)
+        
+        if carry_over == 0:
+            rounded_mantissa.reverse()
+            
+            rounded_mantissa_out = ''.join(str(bit) for bit in rounded_mantissa)
+            return exponent, rounded_mantissa_out
+
+        else:
+            for bit_index, bit in enumerate(exponent_lst):
+                new_bit: int = 0
+
+                if bit_index == 0:
+                    new_bit, carry_over = full_adder(input_a = bit, carry_in = 1)
+                    rounded_exponent.append(new_bit)
+                            
+                else:
+                    new_bit, carry_over = full_adder(input_a = bit, carry_in = carry_over)
+                    rounded_exponent.append(new_bit)
+
+            rounded_exponent.reverse()
+            rounded_mantissa.reverse()
+
+            rounded_exponent_out = ''.join(str(bit) for bit in rounded_exponent)
+            rounded_mantissa_out = ''.join(str(bit) for bit in rounded_mantissa)
+
+            return rounded_exponent_out, rounded_mantissa_out
+
+    else:
+        return '', ''         
+
+
+#Refactored, working version
+def float_to_binary(num: float, bit_len: int = 32) -> str:
+    """
+    Convert a floating point number to binary representation in IEEE 754 format.
+    
+    Implements complete IEEE 754 standard including:
+    - Proper handling of normal and subnormal numbers
+    - Special values: +/-0, +/-infinity, NaN  
+    - Hardware-accurate rounding with guard/round/sticky bits
+    - Overflow and underflow detection
+    - Support for both single (32-bit) and double (64-bit) precision
+    
+    Args:
+        num: Float number to convert
+        bit_len: Bit length (32 for single precision, 64 for double precision)
+        
+    Returns:
+        String representation of the binary number in IEEE 754 format
+        
+    Raises:
+        ValueError: If bit_len is not 32 or 64
+        BufferError: If overflow, underflow, or output length mismatch occurs
+    """
+    abs_num: float = abs(num)
+    whole_part: int = int(num)
+    fraction_part: float = num - whole_part
+    sign_bit: str = ""
+    output_bin_string: str = ""
+    extension_bit_number: int = 5
+    rounding_bits: str = ""
+
+    #Handle the 32 or 64 bit numbers
+    if bit_len == 32:
+        exp_len: int = 8
+        mant_len: int = 23 
+        exp_bias: int = 127
+        min_exp: int = -149
+        exp_format: str = '08b'
+
+    elif bit_len == 64:
+        exp_len: int = 11
+        mant_len: int = 52
+        exp_bias: int = 1023
+        min_exp: int = -1074
+        exp_format: str = '011b'
+    
+    else:
+        raise ValueError(f"float_to_binary: Unsupported bit length, 32 or 64 expected, {bit_len} given.")
+
+    #Handle the sign bit
+    if num < 0:
+        sign_bit = "1"
+    else:
+        sign_bit = "0"
+
+    #Handle the 0.0 case
+    if num == 0.0:
+        return sign_bit + "0" * (bit_len -1)
+
+    #Handle NaN:
+    #Take advantage of a unique property of NaN: it's the only value that is not equal to itself. According to IEEE 754:
+    #For any normal number x, x == x is always true
+    #For NaN, NaN == NaN is always false
+    if num != num:
+        return sign_bit + ('1' * exp_len) + '1' + ('0' * (mant_len - 1))
+
+    #Handle infinity
+    #I choose to use the test from the math library
+    if math.isinf(num):
+        return sign_bit + ('1' * exp_len) + ('0' * mant_len)
+
+    #Separate normal and subnormal range handling for building the exponent and mantissa
+    if abs_num < 2**(1-exp_bias): #subnormal numbers
+        subnorm_bin: str = ""
+        
+        #exponent for subnormal numbers
+        biased_exponent: int = 0 #for subnormal numbers the exponent field is supposed to be all 0s
+
+        #fraction for subnormal numbers
+        scaled_fraction: float = abs_num * (2 ** (exp_bias - 1))
+        while scaled_fraction != 0 and len(subnorm_bin) < (mant_len + extension_bit_number):
+            scaled_fraction *= 2
+            bit: int = int(scaled_fraction)
+            subnorm_bin += str(bit)
+            scaled_fraction -= bit
+
+        #mantissa for subnormal numbers
+        mantissa: str = subnorm_bin.ljust(mant_len, '0')
+
+    else: #normal numbers
+        wholeP_bin: str = format(abs(whole_part), 'b')
+        fractionP_bin: str = ""
+        exponent: int = 0
+        
+        #exponent for normal numbers
+        exponent: int = math.floor(math.log2(abs_num))
+        biased_exponent: int = exponent + exp_bias
+
+        if exponent > exp_bias:
+            raise BufferError(f"float_to_binary: overflow detected.")
+        elif exponent < min_exp:
+            raise BufferError(f"float_to_binary: underflow detected.")
+     
+        #fraction for normal numbers
+        fraction_mult: float = abs(fraction_part)
+        while fraction_mult != 0 and ((len(wholeP_bin) - 1) + len(fractionP_bin)) < (mant_len + extension_bit_number):
+            fraction_mult *= 2
+            bit: int = int(fraction_mult)
+            fractionP_bin += str(bit)
+            fraction_mult -= bit
+
+        #mantissa for normal numbers
+        mantissa: str = wholeP_bin[1:] + fractionP_bin
+    
+    
+    #Translate the biased exponent to binary
+    biased_exp_bin: str = format(biased_exponent, exp_format)
+    
+    #Pad mantissa if needed or round as necessary
+    if len(mantissa) < mant_len:
+        padding: str = "".join("0" for _ in range(mant_len - len(mantissa)))
+        mantissa += padding
+    
+    elif len(mantissa) > mant_len:
+        rounding_bits = mantissa[mant_len:]
+        mantissa = mantissa[0 : mant_len]
+
+        biased_exp_bin, mantissa = float_rounder(exponent = biased_exp_bin, mantissa = mantissa, rounding_bits= rounding_bits)
+        
+    #Build the final output binary and check the output length
+    output_bin_string = sign_bit + biased_exp_bin + mantissa
+
+    if len(output_bin_string) != bit_len:
+       raise BufferError(f"float_to_binary: the output bit len was expected to be {bit_len}, {len(output_bin_string)} was received")
+   
+
+    return output_bin_string
