@@ -19,6 +19,22 @@ class AU:
         return self.__str__()
 
     def full_adder(self, input_a: int = 0, input_b: int = 0, carry_in: int = 0) -> tuple[int, int]:
+        """
+        Hardware-level 1-bit full adder implementation.
+        
+        Performs binary addition of two single bits plus a carry input,
+        producing a sum bit and carry output. This mimics actual CPU
+        arithmetic logic unit (ALU) behavior.
+        
+        Args:
+            input_a: First input bit (0 or 1)
+            input_b: Second input bit (0 or 1) 
+            carry_in: Carry input from previous bit position (0 or 1)
+            
+        Returns:
+            tuple[int, int]: (sum_bit, carry_out)
+        """
+        
         carry: int = carry_in
         carry_out: int = 0
 
