@@ -2842,61 +2842,46 @@ def fp_twos_complement(bit_seq: list[int]) -> list[int]:
 
         return twoC_seq
 
-def is_input_negative(input_int: int, bit_len: int = 64) -> bool:
-        """
-        Separates the sign bit and checks if the number is negative or positive.
-    
-        Args:
-            input_int: The integer to check
-            bit_len: The bit width to use (default: 64)
+def add_biased_exponents(exponent_1: list[int], exponent_2: list[int], intermediate_len: int) -> list[int]:
         
-        Returns:
-            A boolean value, True if the number is negative, False if positive.
-        """
+        #Borrow the exponents
+        exp_1: list[int] = exponent_1.copy()
+        exp_2: list[int] = exponent_2.copy()
 
-        sign_mask: int = (1 << (bit_len - 1))
-        output: bool = False
-
-        if (input_int & sign_mask) != 0:
-            output = True
-
-        return  output
-
-def add_ints(int_1: int, int_2:int, bit_len: int = 64) -> int:
-        i_1: list[int] = int_to_bits(input_int = int_1)
-        i_2: list[int] = int_to_bits(input_int = int_2)
+        #Reverse the exponents for easier bitwise operations
+        exp_1.reverse()
+        exp_2.reverse()
         
+        #Declare variables
         carry_over: int = 0
         new_seq: list[int] = []
-        output: int = 0
         msb_in: int = 0
 
+        #Pad the exponents to the intermediate bit length 
+        if len(exp_1) != intermediate_len or len(exp_2) != intermediate_len:
+            exp_1.extend([0 for _ in range(intermediate_len - len(exp_1))])
+            exp_2.extend([0 for _ in range(intermediate_len - len(exp_2))])
 
-        for bit_index in range(bit_len):
+        #Do bitwise addition with the full adder
+        for bit_index in range(intermediate_len):
             new_bit: int = 0
             
-            if bit_index == (bit_len - 1):
+            if bit_index == (intermediate_len - 1):
                 msb_in = carry_over
 
-            new_bit, carry_over = full_adder(input_a = i_1[bit_index], input_b = i_2[bit_index], carry_in = carry_over)
+            new_bit, carry_over = full_adder(input_a = exp_1[bit_index], input_b = exp_2[bit_index], carry_in = carry_over)
 
             new_seq.append(new_bit)
 
+        #Check for overflow
         if msb_in != carry_over:
             raise AluError(message="add_ints: overflow detected at the end of int addition")
 
-        output = bit_to_int(new_seq)
-
-        #Interpret 'result' as a two's‑complement value in 'width' bits, and return it as a Python signed int (the part after the end checks if 
-        #the value is interpreted incorrectly).
-        if is_input_negative(input_int = output) and (output >= (1 << (bit_len - 1))):
-            output = output - (1 << bit_len) #this will shift back a two's complement integer into the proper python representation
-
-        return output
+        return new_seq
     
 
-def sub_bias(exponent_seq: list[int], bias: int, exponent_len: int = 8) -> list[int]:
-        bias_seq: list[int] = int_to_bits(input_int = bias, bit_len = exponent_len)
+def sub_bias(exponent_seq: list[int], bias: int, intermediate_len: int, final_len: int) -> list[int]:
+        bias_seq: list[int] = int_to_bits(input_int = bias, bit_len = intermediate_len)
         bias_2c: list[int] = fp_twos_complement(bit_seq = bias_seq)
 
         carry_over: int = 0
@@ -2904,10 +2889,10 @@ def sub_bias(exponent_seq: list[int], bias: int, exponent_len: int = 8) -> list[
         msb_in: int = 0
 
 
-        for bit_index in range(exponent_len):
+        for bit_index in range(intermediate_len):
             new_bit: int = 0
 
-            if bit_index == (exponent_len - 1):
+            if bit_index == (intermediate_len - 1):
                 msb_in = carry_over
             
             new_bit, carry_over = full_adder(input_a = exponent_seq[bit_index], input_b = bias_2c[bit_index], carry_in = carry_over)
@@ -2916,8 +2901,11 @@ def sub_bias(exponent_seq: list[int], bias: int, exponent_len: int = 8) -> list[
 
         if msb_in != carry_over:
             raise AluError(message="sub_bias: overflow detected at the end of int subtraction")
+        
+        output: list[int] = new_seq[0:final_len]
+        output = output[::-1]
 
-        return new_seq
+        return output
 
 def float_multiplier(num_1: float | int, num_2: float | int, precision: int = 64) -> float:
     """The function multiplies two 32 or 64 bit floating point numbers together, based on the formula:
@@ -2938,21 +2926,31 @@ def float_multiplier(num_1: float | int, num_2: float | int, precision: int = 64
     n1_bit_lst: list[int] = [int(i) for i in num_1_bits]
     n2_bit_lst: list[int] = [int(i) for i in num_2_bits]
 
-    #Calculate the new exponent
+    #Define features based on precision
     if precision == 32:
         exp_len: int = 8
         mant_len: int = 23
         exp_bias: int = 127
+        intermediate_buffer_len: int = 10
 
     elif precision == 64:
         exp_len: int = 11
         mant_len: int = 52
         exp_bias: int = 1023
+        intermediate_buffer_len: int = 13
 
     else:
         raise ValueError(f"float_multiplier: 32 or 64 was expected for precision, {precision} was provided.")
     
-    n1_exp: 
+    #Calculate the new exponent
+    num_1_exp: list[int] = n1_bit_lst[1 : exp_len + 1]
+    num_2_exp: list[int] = n2_bit_lst[1 : exp_len + 1]
+    
+    #NOTE: by subtracting one bias I do not need to re-add the bias at the end of the operation to get the proper exponent bit string
+    exponent_sum: list[int] = add_biased_exponents(exponent_1 = num_1_exp, exponent_2 = num_2_exp, intermediate_len = intermediate_buffer_len)
+    new_exponent: list[int] = sub_bias(exponent_seq = exponent_sum, bias = exp_bias, intermediate_len = intermediate_buffer_len, final_len = exp_len)
+
+    print(new_exponent)
 
 
 
