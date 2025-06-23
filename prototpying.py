@@ -2421,7 +2421,7 @@ def binary_to_float(fpn_bit_string: str, bit_len: int = 32) -> float:
     if bit_len == 32:
         exponent_string = fpn_bit_string[1:9]
         mantissa_string = fpn_bit_string[9:len(fpn_bit_string)]
-        exp_offset: int = 127
+        exp_offset: int = 127 #ensures that one can have fractional numbers by shifting the exponent into negative. Roughly half of the range is the bias/offset.
     
     elif bit_len == 64:
         exponent_string = fpn_bit_string[1:12]
@@ -2624,7 +2624,7 @@ def float_rounder(exponent: str, mantissa: str, rounding_bits: str) -> tuple[str
 
 
 #Refactored, working version
-def float_to_binary(num: float, bit_len: int = 32) -> str:
+def float_to_binary(num: float | int, bit_len: int = 32) -> str:
     """
     Convert a floating point number to binary representation in IEEE 754 format.
     
@@ -2702,13 +2702,10 @@ def float_to_binary(num: float, bit_len: int = 32) -> str:
         biased_exponent: int = 0 #for subnormal numbers the exponent field is supposed to be all 0s
 
         #fraction for subnormal numbers
-        # ─────────────────────────────────────────────────────────────────────────────
-        # For IEEE-754 subnormals the stored value is:
-        #     abs_num = (0.b1b2…bₘ)₂ × 2^(1−bias)
+        # For subnormals the stored value is: abs_num = (0.b1b2…bₘ)₂ × 2^(1−bias)
         # so to extract the pure fraction bits 0.b1b2… we divide out 2^(1−bias),
         # i.e. multiply by 2^(bias−1).  The binary “.xxxxx…” expansion of that
         # product yields exactly the mantissa bits for the subnormal case.
-        # ─────────────────────────────────────────────────────────────────────────────
         scaled_fraction: float = abs_num * (2 ** (exp_bias - 1))
         while scaled_fraction != 0 and len(subnorm_bin) < (mant_len + extension_bit_number):
             scaled_fraction *= 2
@@ -2767,3 +2764,197 @@ def float_to_binary(num: float, bit_len: int = 32) -> str:
    
 
     return output_bin_string
+
+
+def int_to_bits(input_int: int, bit_len: int = 64) -> list[int]:
+        """
+        Convert an integer to its binary representation as a list of bits.
+    
+        Args:
+            input_int: The integer to convert
+            bit_len: The bit width to use (default: 64)
+        
+        Returns:
+            A list of bits, with least significant bit first
+        """
+        
+        width_mask: int = (1 << bit_len) -1 #creates a mask of 64 1s to cut the target to 64 bits
+        bit_seq: list[int] = []
+
+        masked_input = input_int & width_mask
+
+        for bit_index in range(bit_len):
+            bit_seq.append((masked_input >> bit_index) & 1)
+
+        return bit_seq
+
+def bit_to_int(input_bits: list[int]) -> int:
+        """
+        Convert a list of bits to an integer.
+    
+        Args:
+            input_bits: The bit list to convert
+        
+        Returns:
+            The integer value represented by the bit list.
+        """
+        
+        bit_string: int = 0
+
+        for i, bit in enumerate(input_bits):
+            mask: int = bit << i
+            bit_string = bit_string | mask
+
+        return bit_string
+
+def fp_twos_complement(bit_seq: list[int]) -> list[int]:
+        """
+        Converts a bit sequence to it's two's complement representation.
+    
+        Args:
+            num: An integer to convert
+        
+        Returns:
+            A two's complement bit list representation of the given number with least significant bit first.
+        """
+
+        complement_seq: list[int] = []
+        twoC_seq: list[int] = []
+        carry_over: int = 0
+
+        for bit in bit_seq:
+            if bit == 0:
+                complement_seq.append(1)
+            else:
+                complement_seq.append(0)
+
+        for i, bit in enumerate(complement_seq):
+            new_bit: int = 0
+            
+            if i == 0:
+                new_bit, carry_over = full_adder(input_a = bit, carry_in = 1)
+                twoC_seq.append(new_bit)
+
+            else:
+                
+                new_bit, carry_over = full_adder(input_a = bit, carry_in = carry_over)
+                twoC_seq.append(new_bit)
+
+        return twoC_seq
+
+def is_input_negative(input_int: int, bit_len: int = 64) -> bool:
+        """
+        Separates the sign bit and checks if the number is negative or positive.
+    
+        Args:
+            input_int: The integer to check
+            bit_len: The bit width to use (default: 64)
+        
+        Returns:
+            A boolean value, True if the number is negative, False if positive.
+        """
+
+        sign_mask: int = (1 << (bit_len - 1))
+        output: bool = False
+
+        if (input_int & sign_mask) != 0:
+            output = True
+
+        return  output
+
+def add_ints(int_1: int, int_2:int, bit_len: int = 64) -> int:
+        i_1: list[int] = int_to_bits(input_int = int_1)
+        i_2: list[int] = int_to_bits(input_int = int_2)
+        
+        carry_over: int = 0
+        new_seq: list[int] = []
+        output: int = 0
+        msb_in: int = 0
+
+
+        for bit_index in range(bit_len):
+            new_bit: int = 0
+            
+            if bit_index == (bit_len - 1):
+                msb_in = carry_over
+
+            new_bit, carry_over = full_adder(input_a = i_1[bit_index], input_b = i_2[bit_index], carry_in = carry_over)
+
+            new_seq.append(new_bit)
+
+        if msb_in != carry_over:
+            raise AluError(message="add_ints: overflow detected at the end of int addition")
+
+        output = bit_to_int(new_seq)
+
+        #Interpret 'result' as a two's‑complement value in 'width' bits, and return it as a Python signed int (the part after the end checks if 
+        #the value is interpreted incorrectly).
+        if is_input_negative(input_int = output) and (output >= (1 << (bit_len - 1))):
+            output = output - (1 << bit_len) #this will shift back a two's complement integer into the proper python representation
+
+        return output
+    
+
+def sub_bias(exponent_seq: list[int], bias: int, exponent_len: int = 8) -> list[int]:
+        bias_seq: list[int] = int_to_bits(input_int = bias, bit_len = exponent_len)
+        bias_2c: list[int] = fp_twos_complement(bit_seq = bias_seq)
+
+        carry_over: int = 0
+        new_seq: list[int] = []
+        msb_in: int = 0
+
+
+        for bit_index in range(exponent_len):
+            new_bit: int = 0
+
+            if bit_index == (exponent_len - 1):
+                msb_in = carry_over
+            
+            new_bit, carry_over = full_adder(input_a = exponent_seq[bit_index], input_b = bias_2c[bit_index], carry_in = carry_over)
+
+            new_seq.append(new_bit)
+
+        if msb_in != carry_over:
+            raise AluError(message="sub_bias: overflow detected at the end of int subtraction")
+
+        return new_seq
+
+def float_multiplier(num_1: float | int, num_2: float | int, precision: int = 64) -> float:
+    """The function multiplies two 32 or 64 bit floating point numbers together, based on the formula:
+    (Xmant. * Ymant.) * 2^(Xexp + Yexp) """
+
+    #Argument type checks
+    if not isinstance(num_1, (float, int)) or not isinstance(num_2, (float, int)):
+        raise TypeError(f"float_multiplier: the arguments num_1 and num_2 must be of type float or int, {isinstance(num_1, (float, int))} and {isinstance(num_2, (float, int))} were provided.")
+
+    if not isinstance(precision, (int)):
+        raise TypeError(f"float_multiplier: the argument precision must be of type int, {isinstance(precision, (int))} was provided.")
+
+    #Convert the inputs to bit strings
+    num_1_bits: str = float_to_binary(num = num_1, bit_len = precision)
+    num_2_bits: str = float_to_binary(num = num_2, bit_len = precision)
+
+    #Convert the bit strings to lists
+    n1_bit_lst: list[int] = [int(i) for i in num_1_bits]
+    n2_bit_lst: list[int] = [int(i) for i in num_2_bits]
+
+    #Calculate the new exponent
+    if precision == 32:
+        exp_len: int = 8
+        mant_len: int = 23
+        exp_bias: int = 127
+
+    elif precision == 64:
+        exp_len: int = 11
+        mant_len: int = 52
+        exp_bias: int = 1023
+
+    else:
+        raise ValueError(f"float_multiplier: 32 or 64 was expected for precision, {precision} was provided.")
+    
+    n1_exp: 
+
+
+
+
+
