@@ -2391,6 +2391,7 @@ def float_to_binary(num: float, bit_len: int = 32) -> str:
 
 float_bin: str = "01000001100011010000000000000000"
 import math
+from Custom_errors import FpuError
 
 def binary_to_float(fpn_bit_string: str, bit_len: int = 64) -> float:
     """
@@ -2901,7 +2902,7 @@ def add_biased_exponents(exponent_1: list[int], exponent_2: list[int], intermedi
 
     #Check for overflow
     if msb_in != carry_over:
-        raise AluError(message="add_ints: overflow detected at the end of int addition")
+        raise FpuError(message="add_ints: overflow detected at the end of int addition")
 
     return new_seq
     
@@ -2951,9 +2952,15 @@ def sub_bias(exponent_seq: list[int], bias: int, intermediate_len: int, final_le
         new_seq.append(new_bit)
 
     if msb_in != carry_over:
-        raise AluError(message="sub_bias: overflow detected at the end of int subtraction")
-        
-    output: list[int] = new_seq[0:final_len]
+        raise FpuError(message="sub_bias: overflow detected at the end of bias subtraction")
+    
+    #detect overflow which should produce an Inf value
+    if new_seq[final_len : len(new_seq)].count(1) != 0: #there are 1s over the exponent bit limit
+        output: list[int] = [1 for _ in range(final_len)] #Inf exponent pattern: all 1s
+    
+    else:
+        output: list[int] = new_seq[0:final_len]
+    
     output = output[::-1]
 
     return output
@@ -3199,6 +3206,21 @@ def float_multiplier(multiplicand: float | int, multiplier: float | int, precisi
     exponent_sum: list[int] = add_biased_exponents(exponent_1 = num_1_exp, exponent_2 = num_2_exp, intermediate_len = intermediate_buffer_len)
     new_exponent: list[int] = sub_bias(exponent_seq = exponent_sum, bias = exp_bias, intermediate_len = intermediate_buffer_len, final_len = exp_len)
 
+    #Infinity check and exit upon exponent overflow
+    if new_exponent.count(0) == 0: #only 1s, no 0s
+        final_exponent: str = ""
+        for bit in new_exponent:
+            final_exponent += str(bit)
+
+        final_mantissa: str = "0" * mant_len #mantissa must be all 0s
+
+        new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+        final_sign_bit: str = str(new_sign_bit)
+
+        float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+
+        return binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+
     #Calculate the new, full length mantissa product and the potential new exponent
     multiplicand_mantissa: list[int] = n1_bit_lst[exp_len + 1 : (exp_len + 1) + mant_len] #bit 9 -> bit 32 in a 32 bit float (bit 32 is exclusive)
     multiplier_mantissa: list[int] = n2_bit_lst[exp_len + 1 : (exp_len + 1) + mant_len]
@@ -3222,7 +3244,7 @@ def float_multiplier(multiplicand: float | int, multiplier: float | int, precisi
     
     final_exponent, final_mantissa = float_rounder(exponent = exponent_string, mantissa = mantissa_string, rounding_bits = rounding_bits)
     
-    #Decide the sign bit
+    #Decide the sign bit using the xor operation
     new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
     final_sign_bit: str = str(new_sign_bit)
 
