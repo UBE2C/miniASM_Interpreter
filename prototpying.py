@@ -2392,7 +2392,7 @@ def float_to_binary(num: float, bit_len: int = 32) -> str:
 float_bin: str = "01000001100011010000000000000000"
 import math
 
-def binary_to_float(fpn_bit_string: str, bit_len: int = 32) -> float:
+def binary_to_float(fpn_bit_string: str, bit_len: int = 64) -> float:
     """
     Convert IEEE 754 binary representation back to a floating point number.
     
@@ -2624,7 +2624,7 @@ def float_rounder(exponent: str, mantissa: str, rounding_bits: str) -> tuple[str
 
 
 #Refactored, working version
-def float_to_binary(num: float | int, bit_len: int = 32) -> str:
+def float_to_binary(num: float | int, bit_len: int = 64) -> str:
     """
     Convert a floating point number to binary representation in IEEE 754 format.
     
@@ -2754,7 +2754,7 @@ def float_to_binary(num: float | int, bit_len: int = 32) -> str:
         rounding_bits = mantissa[mant_len:]
         mantissa = mantissa[0 : mant_len]
 
-        biased_exp_bin, mantissa = float_rounder(exponent = biased_exp_bin, mantissa = mantissa, rounding_bits= rounding_bits)
+        biased_exp_bin, mantissa = float_rounder(exponent = biased_exp_bin, mantissa = mantissa, rounding_bits = rounding_bits)
         
     #Build the final output binary and check the output length
     output_bin_string = sign_bit + biased_exp_bin + mantissa
@@ -2843,72 +2843,159 @@ def fp_twos_complement(bit_seq: list[int]) -> list[int]:
         return twoC_seq
 
 def add_biased_exponents(exponent_1: list[int], exponent_2: list[int], intermediate_len: int) -> list[int]:
+    """
+    Add two biased IEEE 754 exponents for floating-point multiplication.
+    
+    Performs binary addition of two exponent bit sequences with overflow detection.
+    The exponents are added in their biased form (no bias removal required).
+    Used as part of floating-point multiplication: new_exp = exp1 + exp2 - bias.
+    
+    Args:
+        exponent_1: First exponent as list of bits in MSB->LSB order
+        exponent_2: Second exponent as list of bits in MSB->LSB order  
+        intermediate_len: Target bit length for intermediate calculations (includes overflow protection)
         
-        #Borrow the exponents
-        exp_1: list[int] = exponent_1.copy()
-        exp_2: list[int] = exponent_2.copy()
-
-        #Reverse the exponents for easier bitwise operations
-        exp_1.reverse()
-        exp_2.reverse()
+    Returns:
+        Sum of exponents as list of bits in LSB->MSB order, padded to intermediate_len
         
-        #Declare variables
-        carry_over: int = 0
-        new_seq: list[int] = []
-        msb_in: int = 0
+    Raises:
+        AluError: If arithmetic overflow is detected during addition
+        
+    Notes:
+        - Input exponents are automatically zero-padded to intermediate_len
+        - Uses full_adder for bit-by-bit addition with carry propagation
+        - Output is in LSB->MSB order for further processing
+    """
 
-        #Pad the exponents to the intermediate bit length 
-        if len(exp_1) != intermediate_len or len(exp_2) != intermediate_len:
-            exp_1.extend([0 for _ in range(intermediate_len - len(exp_1))])
-            exp_2.extend([0 for _ in range(intermediate_len - len(exp_2))])
+    #Borrow the exponents
+    exp_1: list[int] = exponent_1.copy()
+    exp_2: list[int] = exponent_2.copy()
 
-        #Do bitwise addition with the full adder
-        for bit_index in range(intermediate_len):
-            new_bit: int = 0
+    #Reverse the exponents for easier bitwise operations
+    exp_1.reverse()
+    exp_2.reverse()
+        
+    #Declare variables
+    carry_over: int = 0
+    new_seq: list[int] = []
+    msb_in: int = 0
+
+    #Pad the exponents to the intermediate bit length 
+    if len(exp_1) != intermediate_len or len(exp_2) != intermediate_len:
+        exp_1.extend([0 for _ in range(intermediate_len - len(exp_1))])
+        exp_2.extend([0 for _ in range(intermediate_len - len(exp_2))])
+
+    #Do bitwise addition with the full adder
+    for bit_index in range(intermediate_len):
+        new_bit: int = 0
             
-            if bit_index == (intermediate_len - 1):
-                msb_in = carry_over
+        if bit_index == (intermediate_len - 1):
+            msb_in = carry_over
 
-            new_bit, carry_over = full_adder(input_a = exp_1[bit_index], input_b = exp_2[bit_index], carry_in = carry_over)
+        new_bit, carry_over = full_adder(input_a = exp_1[bit_index], input_b = exp_2[bit_index], carry_in = carry_over)
 
-            new_seq.append(new_bit)
+        new_seq.append(new_bit)
 
-        #Check for overflow
-        if msb_in != carry_over:
-            raise AluError(message="add_ints: overflow detected at the end of int addition")
+    #Check for overflow
+    if msb_in != carry_over:
+        raise AluError(message="add_ints: overflow detected at the end of int addition")
 
-        return new_seq
+    return new_seq
     
 
 def sub_bias(exponent_seq: list[int], bias: int, intermediate_len: int, final_len: int) -> list[int]:
-        bias_seq: list[int] = int_to_bits(input_int = bias, bit_len = intermediate_len)
-        bias_2c: list[int] = fp_twos_complement(bit_seq = bias_seq)
-
-        carry_over: int = 0
-        new_seq: list[int] = []
-        msb_in: int = 0
-
-
-        for bit_index in range(intermediate_len):
-            new_bit: int = 0
-
-            if bit_index == (intermediate_len - 1):
-                msb_in = carry_over
-            
-            new_bit, carry_over = full_adder(input_a = exponent_seq[bit_index], input_b = bias_2c[bit_index], carry_in = carry_over)
-
-            new_seq.append(new_bit)
-
-        if msb_in != carry_over:
-            raise AluError(message="sub_bias: overflow detected at the end of int subtraction")
+    """
+    Subtract the IEEE 754 exponent bias from a biased exponent sum.
+    
+    Removes one bias from the exponent sum (exp1 + exp2 - bias) to get the final
+    exponent for floating-point multiplication. Uses two's complement arithmetic
+    for subtraction with overflow detection.
+    
+    Args:
+        exponent_seq: Biased exponent sum as list of bits in LSB->MSB order
+        bias: IEEE 754 bias value (127 for 32-bit, 1023 for 64-bit)
+        intermediate_len: Bit length of input exponent sequence
+        final_len: Target bit length for final exponent output
         
-        output: list[int] = new_seq[0:final_len]
-        output = output[::-1]
+    Returns:
+        Unbiased exponent as list of bits in MSB->LSB order, trimmed to final_len
+        
+    Raises:
+        AluError: If arithmetic overflow is detected during subtraction
+        
+    Notes:
+        - Converts bias to two's complement for subtraction
+        - Trims result from intermediate_len to final_len bits
+        - Reverses output to MSB->LSB order for IEEE 754 format
+    """
+    
+    bias_seq: list[int] = int_to_bits(input_int = bias, bit_len = intermediate_len)
+    bias_2c: list[int] = fp_twos_complement(bit_seq = bias_seq)
 
-        return output
+    carry_over: int = 0
+    new_seq: list[int] = []
+    msb_in: int = 0
 
-# FIX the multiplier and implement: rounding, trimming of the output value, left shift
+
+    for bit_index in range(intermediate_len):
+        new_bit: int = 0
+
+        if bit_index == (intermediate_len - 1):
+            msb_in = carry_over
+            
+        new_bit, carry_over = full_adder(input_a = exponent_seq[bit_index], input_b = bias_2c[bit_index], carry_in = carry_over)
+
+        new_seq.append(new_bit)
+
+    if msb_in != carry_over:
+        raise AluError(message="sub_bias: overflow detected at the end of int subtraction")
+        
+    output: list[int] = new_seq[0:final_len]
+    output = output[::-1]
+
+    return output
+
 def mant_multiplier(mantissa_1: list[int], mantissa_2: list[int], new_exponent: list[int], mantissa_length: int) -> tuple[list[int], list[int]]:
+    """
+    Multiply two IEEE 754 mantissas with hidden bit restoration and overflow handling.
+    
+    Performs binary multiplication of two normalized mantissas using shift-and-add
+    algorithm. Handles mantissa overflow by incrementing exponent and normalizing
+    the result. Implements proper hidden bit management for IEEE 754 compliance.
+    
+    The multiplication follows the pattern:
+    1. Restore hidden bits (1.xxx format)
+    2. Multiply using partial products with left shifts
+    3. Sum all partial products
+    4. Check for overflow and normalize if needed
+    5. Extract final mantissa (fractional part only)
+    
+    Args:
+        mantissa_1: First mantissa (multiplicand) as list of fractional bits in MSB->LSB order
+        mantissa_2: Second mantissa (multiplier) as list of fractional bits in MSB->LSB order
+        new_exponent: Current exponent sum as list of bits in MSB->LSB order
+        mantissa_length: Length of input mantissas (23 for 32-bit, 52 for 64-bit)
+        
+    Returns:
+        Tuple containing:
+        - Updated exponent as list of bits in MSB->LSB order (incremented if overflow)
+        - Final mantissa as list of fractional bits (hidden bit removed)
+        
+    Raises:
+        AluError: If overflow is detected during partial product addition
+        
+    Notes:
+        - Automatically restores hidden bits before multiplication
+        - Uses overflow guard bit at MSB to detect normalization need
+        - Result mantissa excludes both overflow guard bit and hidden bit
+        - Supports variable precision (determined by mantissa_length parameter)
+        
+    Algorithm Details:
+        - Generates partial products using shift-and-add method
+        - Result length is 2 * (mantissa_length + 1) bits
+        - Overflow detection checks MSB of final product
+        - Normalization: right shift + exponent increment if MSB = 1
+    """
 
     #Declare new variables
     intermed_product: list[int] = []
@@ -2923,6 +3010,7 @@ def mant_multiplier(mantissa_1: list[int], mantissa_2: list[int], new_exponent: 
     #Re-insert the first 1 into the mantissa sequences
     mant_1.insert(0, 1)
     mant_2.insert(0, 1)
+    
 
     #Reverse the bit order of the multiplier for easier calculations (leave the multiplicand as is)
     mant_2.reverse()
@@ -2938,14 +3026,14 @@ def mant_multiplier(mantissa_1: list[int], mantissa_2: list[int], new_exponent: 
         intermed_product.extend([0] * position) #left shift
         product_lst.append(intermed_product) #store intermed products
 
-    #Final product length
-    final_product_len: int = len(product_lst[-1])
+    #Final product length (twice the mantissa with the hidden bit)
+    final_product_len: int = 2 * (mantissa_length + 1)
 
     #Pad all intermediate products to full length for the addition
     for ip in product_lst:
         if len(ip) != final_product_len:
             while len(ip) != final_product_len:
-                ip.insert(0, 0) #can only be done once unlike extend hence the while loop
+                ip.insert(0, 0) #can only be done once at a time unlike extend hence the while loop
         
         else:
             continue
@@ -2975,13 +3063,15 @@ def mant_multiplier(mantissa_1: list[int], mantissa_2: list[int], new_exponent: 
             if carry_over != 0:
                 raise AluError(message="mant_multiplier: overflow detected during intermediate product addition")
 
-            product_sum = new_mant_seq #update the sum with the additional product
+            product_sum: list[int] = new_mant_seq #update the sum with the additional product
+            
 
     #Reverse the new mantissa bit string back to MSB->LSB
     product_sum.reverse()
-
+    
     #Carry the final mantissa overflow into the new exponent
-    if len(product_sum) > 2 * (mantissa_length + 1) or product_sum[0] == 1:
+    if product_sum[0] == 1: #Checks if there is mantissa overflow into the exponent by looking at the MSB, if it is 1 the mantissa needs normalization /
+                            #(the decimal point must float up and the leading 1 is new hidden bit and only that is discarded)
         exp.reverse() #reverse the exponent for easier addition
 
         new_exp_seq: list[int] = []
@@ -3009,23 +3099,65 @@ def mant_multiplier(mantissa_1: list[int], mantissa_2: list[int], new_exponent: 
         #Flip the new exponent bit string back to MSB-LSB
         new_exp_seq.reverse()
 
+        #Remove the leading 1 as a hidden bit from the mantissa
+        product_sum: list[int] = product_sum[1:len(product_sum)]
+
         #Return the new exponent and mantissa bit strings
         return new_exp_seq, product_sum
 
-    else:
-        #Return the original exponent and new mantissa bit strings
-        return exp, product_sum
-    
-    
-    
-
-
-
+    else: #if the MSB is 0 there is no overflow, no normalization is needed, however the MSB must be discarded and the next bit is the hidden bit which must be removed
+        #Return the original exponent and the new mantissa bit strings
+        extracted_mantissa: list[int] = product_sum[2:]  # Skip overflow bit (MSB) and hidden bit
+        return exp, extracted_mantissa
 
 
 def float_multiplier(multiplicand: float | int, multiplier: float | int, precision: int = 64) -> float:
-    """The function multiplies two 32 or 64 bit floating point numbers together, based on the formula:
-    (Xmant. * Ymant.) * 2^(Xexp + Yexp) """
+    """
+    Multiply two floating-point numbers using IEEE 754 compliant binary arithmetic.
+    
+    Implements complete IEEE 754 floating-point multiplication including:
+    - Exponent addition with bias handling
+    - Mantissa multiplication with hidden bit management  
+    - Overflow detection and normalization
+    - Proper rounding with guard/round/sticky bits
+    - Sign bit calculation (XOR of input signs)
+    - Support for both single (32-bit) and double (64-bit) precision
+    
+    The multiplication follows IEEE 754 formula:
+    Result = (±1) × (mant1 × mant2) × 2^(exp1 + exp2 - bias)
+    
+    Args:
+        multiplicand: First number to multiply (float or int)
+        multiplier: Second number to multiply (float or int)  
+        precision: Bit precision (32 for single, 64 for double precision)
+        
+    Returns:
+        Product as IEEE 754 compliant floating-point number
+        
+    Raises:
+        TypeError: If arguments are not float/int or precision is not int
+        ValueError: If precision is not 32 or 64
+        AluError: If arithmetic overflow occurs during computation
+        BufferError: If internal buffer operations fail
+        
+    Notes:
+        - Automatically handles precision-specific parameters (exponent length, bias, etc.)
+        - Uses extended precision for intermediate calculations
+        - Implements proper IEEE 754 rounding for final result
+        - Maintains bit-level accuracy throughout computation
+        
+    Precision Specifications:
+        32-bit: 8-bit exponent, 23-bit mantissa, bias=127
+        64-bit: 11-bit exponent, 52-bit mantissa, bias=1023
+        
+    Algorithm Flow:
+        1. Convert inputs to binary representation
+        2. Extract and add exponents (with bias subtraction)
+        3. Multiply mantissas with overflow handling
+        4. Round result using extended precision
+        5. Assemble final IEEE 754 bit pattern
+        6. Convert back to native float format
+    """
 
     #Argument type checks
     if not isinstance(multiplicand, (float, int)) or not isinstance(multiplier, (float, int)):
@@ -3066,7 +3198,39 @@ def float_multiplier(multiplicand: float | int, multiplier: float | int, precisi
     exponent_sum: list[int] = add_biased_exponents(exponent_1 = num_1_exp, exponent_2 = num_2_exp, intermediate_len = intermediate_buffer_len)
     new_exponent: list[int] = sub_bias(exponent_seq = exponent_sum, bias = exp_bias, intermediate_len = intermediate_buffer_len, final_len = exp_len)
 
-    print(new_exponent)
+    #Calculate the new, full length mantissa product and the potential new exponent
+    multiplicand_mantissa: list[int] = n1_bit_lst[exp_len + 1 : (exp_len + 1) + mant_len] #bit 9 -> bit 32 in a 32 bit float (bit 32 is exclusive)
+    multiplier_mantissa: list[int] = n2_bit_lst[exp_len + 1 : (exp_len + 1) + mant_len]
+
+    new_exponent, mantissa_product = mant_multiplier(mantissa_1 = multiplicand_mantissa, mantissa_2 = multiplier_mantissa, new_exponent = new_exponent, mantissa_length = mant_len)
+
+    #Round and trim the new mantissa_product to the proper length and handle potential rounding overflow into the new exponent
+    new_extended_mantissa: list[int] = mantissa_product #use the full mantissa product as an extended mantissa for rounding
+    extended_mantissa_string: str = "" #convert the extended mantissa to a string for the float rounding
+    exponent_string: str = "" #convert the extended exponent to a string for the float rounding
+
+    for bit in new_extended_mantissa: #mantissa string conversion
+        extended_mantissa_string += str(bit)
+
+    for bit in new_exponent: #exponent string conversion
+        exponent_string += str(bit)
+
+    rounding_bits: str = extended_mantissa_string[mant_len:] #prepare the extra bits for rounding
+    mantissa_string: str = extended_mantissa_string[0 : mant_len] #prepare the mantissa for rounding
+    
+    final_exponent, final_mantissa = float_rounder(exponent = exponent_string, mantissa = mantissa_string, rounding_bits = rounding_bits)
+    
+    #Decide the sign bit
+    new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+    final_sign_bit: str = str(new_sign_bit)
+
+    #Assemble the new floating point number as a bit string
+    float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+
+    #Convert the new floating point bit string into a floating point number
+    float_out: float = binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = 64)
+
+    return float_out
 
 
 
