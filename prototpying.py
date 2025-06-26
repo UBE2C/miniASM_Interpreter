@@ -2907,20 +2907,136 @@ def sub_bias(exponent_seq: list[int], bias: int, intermediate_len: int, final_le
 
         return output
 
-def float_multiplier(num_1: float | int, num_2: float | int, precision: int = 64) -> float:
+# FIX the multiplier and implement: rounding, trimming of the output value, left shift
+def mant_multiplier(mantissa_1: list[int], mantissa_2: list[int], new_exponent: list[int], mantissa_length: int) -> tuple[list[int], list[int]]:
+
+    #Declare new variables
+    intermed_product: list[int] = []
+    product_lst: list[list[int]] = []
+    product_sum: list[int] = []
+    
+    #Borrow the mantissas and the exponent
+    mant_1: list[int] = mantissa_1.copy() #multiplicand
+    mant_2: list[int] = mantissa_2.copy() #multiplier
+    exp: list[int] = new_exponent.copy()
+
+    #Re-insert the first 1 into the mantissa sequences
+    mant_1.insert(0, 1)
+    mant_2.insert(0, 1)
+
+    #Reverse the bit order of the multiplier for easier calculations (leave the multiplicand as is)
+    mant_2.reverse()
+
+    #Multiply the mantissa sequences and store the intermediate products
+    for position, bit in enumerate(mant_2):
+        intermed_product = []
+
+        
+        for b in mant_1: #multiplication loop
+            intermed_product.append(bit * b) #bit = multiplier bit, b = multiplicand bit
+
+        intermed_product.extend([0] * position) #left shift
+        product_lst.append(intermed_product) #store intermed products
+
+    #Final product length
+    final_product_len: int = len(product_lst[-1])
+
+    #Pad all intermediate products to full length for the addition
+    for ip in product_lst:
+        if len(ip) != final_product_len:
+            while len(ip) != final_product_len:
+                ip.insert(0, 0) #can only be done once unlike extend hence the while loop
+        
+        else:
+            continue
+
+    #Reverse all intermed_products for easier addition
+    for ip in product_lst:
+        ip.reverse()
+
+    #Sum the intermed_products
+    for i, ip in enumerate(product_lst):
+        if i == 0:
+            product_sum = ip
+
+        else:
+            carry_over: int = 0
+            new_mant_seq: list[int] = []
+            msb_in: int = 0
+
+            for bit_index in range(final_product_len): #add the intermediate_product to the sum
+                new_bit: int = 0
+
+                new_bit, carry_over = full_adder(input_a = product_sum[bit_index], input_b = ip[bit_index], carry_in = carry_over)
+
+                new_mant_seq.append(new_bit)
+
+            #Check for overflow between intermediate products
+            if carry_over != 0:
+                raise AluError(message="mant_multiplier: overflow detected during intermediate product addition")
+
+            product_sum = new_mant_seq #update the sum with the additional product
+
+    #Reverse the new mantissa bit string back to MSB->LSB
+    product_sum.reverse()
+
+    #Carry the final mantissa overflow into the new exponent
+    if len(product_sum) > 2 * (mantissa_length + 1) or product_sum[0] == 1:
+        exp.reverse() #reverse the exponent for easier addition
+
+        new_exp_seq: list[int] = []
+        carry_over: int = 0
+        msb_in: int = 0
+
+        for bit_index in range(len(exp)):
+            new_bit: int = 0
+
+            if bit_index == (len(exp) - 1):
+                msb_in = carry_over
+
+            if bit_index == 0:
+                new_bit, carry_over = full_adder(input_a = exp[bit_index], input_b = 0, carry_in = 1)
+
+            else:
+                new_bit, carry_over = full_adder(input_a = exp[bit_index], input_b = 0, carry_in = carry_over)
+
+            new_exp_seq.append(new_bit)
+
+            #Check for overflow
+            if msb_in != carry_over:
+                raise AluError(message="add_ints: overflow detected at the end of int addition")
+
+        #Flip the new exponent bit string back to MSB-LSB
+        new_exp_seq.reverse()
+
+        #Return the new exponent and mantissa bit strings
+        return new_exp_seq, product_sum
+
+    else:
+        #Return the original exponent and new mantissa bit strings
+        return exp, product_sum
+    
+    
+    
+
+
+
+
+
+def float_multiplier(multiplicand: float | int, multiplier: float | int, precision: int = 64) -> float:
     """The function multiplies two 32 or 64 bit floating point numbers together, based on the formula:
     (Xmant. * Ymant.) * 2^(Xexp + Yexp) """
 
     #Argument type checks
-    if not isinstance(num_1, (float, int)) or not isinstance(num_2, (float, int)):
+    if not isinstance(multiplicand, (float, int)) or not isinstance(multiplier, (float, int)):
         raise TypeError(f"float_multiplier: the arguments num_1 and num_2 must be of type float or int, {isinstance(num_1, (float, int))} and {isinstance(num_2, (float, int))} were provided.")
 
     if not isinstance(precision, (int)):
         raise TypeError(f"float_multiplier: the argument precision must be of type int, {isinstance(precision, (int))} was provided.")
 
     #Convert the inputs to bit strings
-    num_1_bits: str = float_to_binary(num = num_1, bit_len = precision)
-    num_2_bits: str = float_to_binary(num = num_2, bit_len = precision)
+    num_1_bits: str = float_to_binary(num = multiplicand, bit_len = precision)
+    num_2_bits: str = float_to_binary(num = multiplier, bit_len = precision)
 
     #Convert the bit strings to lists
     n1_bit_lst: list[int] = [int(i) for i in num_1_bits]
