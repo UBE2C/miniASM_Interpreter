@@ -3092,9 +3092,9 @@ def mant_multiplier(mantissa_1: list[int], mantissa_2: list[int], new_exponent: 
 
             new_exp_seq.append(new_bit)
 
-            #Check for overflow
-            if msb_in != carry_over:
-                raise AluError(message="add_ints: overflow detected at the end of int addition")
+        #Check for overflow
+        if msb_in != carry_over:
+            raise AluError(message="mant_multiplier: overflow detected during exponent adjustment")
 
         #Flip the new exponent bit string back to MSB-LSB
         new_exp_seq.reverse()
