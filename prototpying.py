@@ -2623,7 +2623,7 @@ def float_rounder(exponent: str, mantissa: str, rounding_bits: str) -> tuple[str
         return '', ''         
 
 
-#Refactored, working version - FIXing is needed!
+#Refactored, working version
 def float_to_binary(num: float | int, bit_len: int = 64) -> str:
     """
     Convert a floating point number to binary representation in IEEE 754 format.
@@ -2739,8 +2739,11 @@ def float_to_binary(num: float | int, bit_len: int = 64) -> str:
             fraction_mult -= bit
 
         #mantissa for normal numbers
-        mantissa: str = wholeP_bin[1:] + fractionP_bin
-    
+        if wholeP_bin == "0": #for small normal numbers between 1 and 0
+            mantissa: str = wholeP_bin[1:] + fractionP_bin[1:] #this will drop the leading zero and convert the first fractional 1 bit into a hidden bit
+
+        else:
+            mantissa: str = wholeP_bin[1:] + fractionP_bin
     
     #Translate the biased exponent to binary
     biased_exp_bin: str = format(biased_exponent, exp_format)
@@ -3197,17 +3200,13 @@ def float_multiplier(multiplicand: float | int, multiplier: float | int, precisi
     new_exponent: list[int] = sub_bias(exponent_seq = exponent_sum, bias = exp_bias, intermediate_len = intermediate_buffer_len, final_len = exp_len)
 
     #Calculate the new, full length mantissa product and the potential new exponent
-    multiplicand_mantissa: list[int] = n1_bit_lst[exp_len +  : (exp_len + 1) + mant_len] #bit 9 -> bit 32 in a 32 bit float (bit 32 is exclusive)
+    multiplicand_mantissa: list[int] = n1_bit_lst[exp_len + 1 : (exp_len + 1) + mant_len] #bit 9 -> bit 32 in a 32 bit float (bit 32 is exclusive)
     multiplier_mantissa: list[int] = n2_bit_lst[exp_len + 1 : (exp_len + 1) + mant_len]
-
-    print(multiplicand_mantissa, multiplier_mantissa)
 
     new_exponent, mantissa_product = mant_multiplier(mantissa_1 = multiplicand_mantissa, mantissa_2 = multiplier_mantissa, new_exponent = new_exponent, mantissa_length = mant_len)
 
     #Round and trim the new mantissa_product to the proper length and handle potential rounding overflow into the new exponent
     new_extended_mantissa: list[int] = mantissa_product #use the full mantissa product as an extended mantissa for rounding
-    
-    print(new_extended_mantissa)
 
     extended_mantissa_string: str = "" #convert the extended mantissa to a string for the float rounding
     exponent_string: str = "" #convert the extended exponent to a string for the float rounding
@@ -3220,8 +3219,6 @@ def float_multiplier(multiplicand: float | int, multiplier: float | int, precisi
 
     rounding_bits: str = extended_mantissa_string[mant_len : (mant_len + 5)] #prepare the extra bits for rounding
     mantissa_string: str = extended_mantissa_string[0 : mant_len] #prepare the mantissa for rounding
-
-    print(mantissa_string, rounding_bits)
     
     final_exponent, final_mantissa = float_rounder(exponent = exponent_string, mantissa = mantissa_string, rounding_bits = rounding_bits)
     
@@ -3233,7 +3230,7 @@ def float_multiplier(multiplicand: float | int, multiplier: float | int, precisi
     float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
 
     #Convert the new floating point bit string into a floating point number
-    float_out: float = binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = 64)
+    float_out: float = binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
 
     return float_out
 
