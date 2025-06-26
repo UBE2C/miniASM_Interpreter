@@ -8,4 +8,8 @@ class vRAMError(Exception):
 
 class AluError(Exception):
     def __init__(self, message):
-        super().__init__(message)        
+        super().__init__(message)
+
+class FpuError(Exception):
+    def __init__(self, message):
+        super().__init__(message)

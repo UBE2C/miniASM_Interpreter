@@ -2742,8 +2742,8 @@ def float_to_binary(num: float | int, bit_len: int = 64) -> str:
         if wholeP_bin == "0": #for small normal numbers between 1 and 0
             mantissa: str = wholeP_bin[1:] + fractionP_bin[1:] #this will drop the leading zero and convert the first fractional 1 bit into a hidden bit
 
-        else:
-            mantissa: str = wholeP_bin[1:] + fractionP_bin
+        else:#for larger normal numbers
+            mantissa: str = wholeP_bin[1:] + fractionP_bin #this will drop the leading zero and convert the first whole number 1 bit into a hidden bit
     
     #Translate the biased exponent to binary
     biased_exp_bin: str = format(biased_exponent, exp_format)
