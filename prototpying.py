@@ -3221,6 +3221,19 @@ def float_multiplier(multiplicand: float | int, multiplier: float | int, precisi
 
         return binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
 
+    #Zero multiplication check and exit upon 0 multiplier or multiplicand
+    if n1_bit_lst.count(1) == 0 or n2_bit_lst.count(1) == 0:
+        final_exponent: str = "0" * exp_len #exponent must be all 0s
+        
+        final_mantissa: str = "0" * mant_len #mantissa must be all 0s
+
+        new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+        final_sign_bit: str = str(new_sign_bit)
+
+        float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+
+        return binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+
     #Calculate the new, full length mantissa product and the potential new exponent
     multiplicand_mantissa: list[int] = n1_bit_lst[exp_len + 1 : (exp_len + 1) + mant_len] #bit 9 -> bit 32 in a 32 bit float (bit 32 is exclusive)
     multiplier_mantissa: list[int] = n2_bit_lst[exp_len + 1 : (exp_len + 1) + mant_len]
