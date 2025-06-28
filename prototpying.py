@@ -2647,13 +2647,10 @@ def float_to_binary(num: float | int, bit_len: int = 64) -> str:
         ValueError: If bit_len is not 32 or 64
         BufferError: If overflow, underflow, or output length mismatch occurs
     """
-    abs_num: float = abs(num)
-    whole_part: int = int(num)
-    fraction_part: float = num - whole_part
+    
+    #Declare the sign bit variable
     sign_bit: str = ""
-    output_bin_string: str = ""
-    extension_bit_number: int = 5
-    rounding_bits: str = ""
+    
 
     #Handle the 32 or 64 bit numbers
     if bit_len == 32:
@@ -2673,6 +2670,7 @@ def float_to_binary(num: float | int, bit_len: int = 64) -> str:
     else:
         raise ValueError(f"float_to_binary: Unsupported bit length, 32 or 64 expected, {bit_len} given.")
 
+    #Handle the main edge cases early
     #Handle the sign bit
     if num < 0:
         sign_bit = "1"
@@ -2694,6 +2692,14 @@ def float_to_binary(num: float | int, bit_len: int = 64) -> str:
     #I choose to use the test from the math library
     if math.isinf(num):
         return sign_bit + ('1' * exp_len) + ('0' * mant_len)
+    
+    #Declare main common variables
+    abs_num: float = abs(num)
+    whole_part: int = int(num)
+    fraction_part: float = num - whole_part
+    output_bin_string: str = ""
+    extension_bit_number: int = 5
+    rounding_bits: str = ""
 
     #Separate normal and subnormal range handling for building the exponent and mantissa
     if abs_num < 2**(1-exp_bias): #subnormal numbers
@@ -3220,8 +3226,22 @@ def float_multiplier(multiplicand: float | int, multiplier: float | int, precisi
         float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
 
         return binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+    
+    #Weird edge case check for 0 * +/- Inf which should produce a NaN
+    if (n1_bit_lst.count(1) == 0 or n2_bit_lst.count(1) == 0) and ((n1_bit_lst[1 : exp_len].count(0) == 0 and n1_bit_lst[exp_len + 1 : mant_len].count(1) == 0)
+                                                                   or (n2_bit_lst[1 : exp_len].count(0) == 0 and n2_bit_lst[exp_len + 1 : mant_len].count(1) == 0)):
+        final_exponent: str = "1" * exp_len #exponent must be all 0s
+        
+        final_mantissa: str = "1" + ("0" * (mant_len - 1)) #mantissa must be all 0s
 
-    #Zero multiplication check and exit upon 0 multiplier or multiplicand
+        new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+        final_sign_bit: str = str(new_sign_bit)
+
+        float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+
+        return binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+    
+    #Normal zero multiplication check and exit upon 0 multiplier or multiplicand
     if n1_bit_lst.count(1) == 0 or n2_bit_lst.count(1) == 0:
         final_exponent: str = "0" * exp_len #exponent must be all 0s
         
