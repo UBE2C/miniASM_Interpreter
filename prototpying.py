@@ -2913,7 +2913,7 @@ def add_biased_exponents(exponent_1: list[int], exponent_2: list[int], intermedi
     return new_seq
     
 
-def sub_bias(exponent_seq: list[int], bias: int, intermediate_len: int, final_len: int) -> list[int]:
+def sub_bias(exponent_seq: list[int], bias: int, intermediate_len: int, final_len: int, subnormal: bool) -> list[int]:
     """
     Subtract the IEEE 754 exponent bias from a biased exponent sum.
     
@@ -2939,7 +2939,12 @@ def sub_bias(exponent_seq: list[int], bias: int, intermediate_len: int, final_le
         - Reverses output to MSB->LSB order for IEEE 754 format
     """
     
-    bias_seq: list[int] = int_to_bits(input_int = bias, bit_len = intermediate_len)
+    if subnormal == True:
+        bias_seq: list[int] = int_to_bits(input_int = (1 - bias), bit_len = intermediate_len)
+
+    else:
+        bias_seq: list[int] = int_to_bits(input_int = bias, bit_len = intermediate_len)
+
     bias_2c: list[int] = fp_twos_complement(bit_seq = bias_seq)
 
     carry_over: int = 0
@@ -3204,13 +3209,43 @@ def float_multiplier(multiplicand: float | int, multiplier: float | int, precisi
     else:
         raise ValueError(f"float_multiplier: 32 or 64 was expected for precision, {precision} was provided.")
     
-    #Calculate the new exponent
+    #Separate the exponent and mantissa bits
     num_1_exp: list[int] = n1_bit_lst[1 : exp_len + 1]
     num_2_exp: list[int] = n2_bit_lst[1 : exp_len + 1]
+
+    multiplicand_mantissa: list[int] = n1_bit_lst[exp_len + 1 : (exp_len + 1) + mant_len] #bit 9 -> bit 32 in a 32 bit float (bit 32 is exclusive)
+    multiplier_mantissa: list[int] = n2_bit_lst[exp_len + 1 : (exp_len + 1) + mant_len]
+
+    #Check for subnormal numbers and normalize them if present
+    nlz: int = 0 #number of leading 0s
+
+    if num_1_exp.count(1) == 0 and (n1_bit_lst[exp_len + 1 : mant_len].count(1) != 0):
+        subnormal_num: bool = True
+        for bit in multiplicand_mantissa:
+            if bit == 0:
+                nlz += 1
+            else:
+                break
+
+        nlz += 1 #add the hidden leading 0
+
+    elif num_2_exp.count(1) == 0 and (n2_bit_lst[exp_len + 1 : mant_len].count(1) != 0):
+        subnormal_num: bool = True
+        for bit in multiplier_mantissa:
+            if bit == 0:
+                nlz += 1
+            else:
+                break
+        
+        nlz += 1 #add the hidden leading 0
     
+    else:
+        subnormal_num: bool = False
+    
+    #Calculate the new exponent
     #NOTE: by subtracting one bias I do not need to re-add the bias at the end of the operation to get the proper exponent bit string
     exponent_sum: list[int] = add_biased_exponents(exponent_1 = num_1_exp, exponent_2 = num_2_exp, intermediate_len = intermediate_buffer_len)
-    new_exponent: list[int] = sub_bias(exponent_seq = exponent_sum, bias = exp_bias, intermediate_len = intermediate_buffer_len, final_len = exp_len)
+    new_exponent: list[int] = sub_bias(exponent_seq = exponent_sum, bias = (exp_bias + nlz), intermediate_len = intermediate_buffer_len, final_len = exp_len, subnormal = subnormal_num)
 
     #Infinity check and exit upon exponent overflow
     if new_exponent.count(0) == 0: #only 1s, no 0s
@@ -3228,11 +3263,11 @@ def float_multiplier(multiplicand: float | int, multiplier: float | int, precisi
         return binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
     
     #Weird edge case check for 0 * +/- Inf which should produce a NaN
-    if (n1_bit_lst.count(1) == 0 or n2_bit_lst.count(1) == 0) and ((n1_bit_lst[1 : exp_len].count(0) == 0 and n1_bit_lst[exp_len + 1 : mant_len].count(1) == 0)
-                                                                   or (n2_bit_lst[1 : exp_len].count(0) == 0 and n2_bit_lst[exp_len + 1 : mant_len].count(1) == 0)):
-        final_exponent: str = "1" * exp_len #exponent must be all 0s
+    if (n1_bit_lst.count(1) == 0 or n2_bit_lst.count(1) == 0) and ((n1_bit_lst[1 : exp_len + 1].count(0) == 0 and n1_bit_lst[exp_len + 1 : mant_len].count(1) == 0)
+                                                                   or (n2_bit_lst[1 : exp_len + 1].count(0) == 0 and n2_bit_lst[exp_len + 1 : mant_len].count(1) == 0)):
+        final_exponent: str = "1" * exp_len #exponent must be all 1s
         
-        final_mantissa: str = "1" + ("0" * (mant_len - 1)) #mantissa must be all 0s
+        final_mantissa: str = "1" + ("0" * (mant_len - 1)) #mantissa must be all 0s with a leading 1
 
         new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
         final_sign_bit: str = str(new_sign_bit)
@@ -3255,9 +3290,6 @@ def float_multiplier(multiplicand: float | int, multiplier: float | int, precisi
         return binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
 
     #Calculate the new, full length mantissa product and the potential new exponent
-    multiplicand_mantissa: list[int] = n1_bit_lst[exp_len + 1 : (exp_len + 1) + mant_len] #bit 9 -> bit 32 in a 32 bit float (bit 32 is exclusive)
-    multiplier_mantissa: list[int] = n2_bit_lst[exp_len + 1 : (exp_len + 1) + mant_len]
-
     new_exponent, mantissa_product = mant_multiplier(mantissa_1 = multiplicand_mantissa, mantissa_2 = multiplier_mantissa, new_exponent = new_exponent, mantissa_length = mant_len)
 
     #Round and trim the new mantissa_product to the proper length and handle potential rounding overflow into the new exponent
