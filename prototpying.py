@@ -3085,7 +3085,7 @@ def sub_bias(exponent_seq: list[int], bias: int, intermediate_len: int, final_le
     if subnormal == True: #for subnormal numbers we use the Ex + Ey (done before) - (1-[127 + nlz]) formula to get a normalized subnormal exponent
         bias_seq: list[int] = int_to_bits(input_int = (1 - bias), bit_len = intermediate_len)
         bias_2c: list[int] = bias_seq #as the generated bias is negative, it is already in two's complement form after translation into a bit seq
-
+        print(f"Here is the bias {1 - bias} and the bias in 2c form {bias_2c}")
     else:
         bias_seq: list[int] = int_to_bits(input_int = bias, bit_len = intermediate_len)
         bias_2c: list[int] = fp_twos_complement(bit_seq = bias_seq)
@@ -3107,13 +3107,22 @@ def sub_bias(exponent_seq: list[int], bias: int, intermediate_len: int, final_le
 
     if msb_in != carry_over:
         raise FpuError(message="sub_bias: overflow detected at the end of bias subtraction")
+
+    print(f"This is the new sequence after sum: {new_seq}")
+
+     #detect a subnormal result in case of a subnormal input which should produce an all 0 exponent by looking at the MSB of the intermediate result (-512/-4096)
+    if subnormal == True and new_seq[-1] == 1:
+        output: list[int] = [0 for _ in range(final_len)] #Subnormal exponent pattern: all 1s
+        print(f"This is the new sequence after sum: {new_seq} so this branch should be active")
     
     #detect overflow which should produce an Inf value
-    if new_seq[final_len : len(new_seq)].count(1) != 0: #there are 1s over the exponent bit limit
-        output: list[int] = [1 for _ in range(final_len)] #Inf exponent pattern: all 1s
+    elif subnormal == False and new_seq[final_len : len(new_seq)].count(1) != 0: #there are 1s over the exponent bit limit
+        output: list[int] = [1 for _ in range(final_len)] #Inf exponent pattern: all 0s
+        print(f"This is the new sequence after sum: {new_seq} so this branch should NOT be active")
     
     else:
         output: list[int] = new_seq[0:final_len]
+        print(f"This is the new sequence after sum: {new_seq} so this branch NOT should be active")
     
     output = output[::-1]
 
@@ -3263,8 +3272,11 @@ def mant_multiplier(mantissa_1: list[int], mantissa_2: list[int], new_exponent: 
             
 
     #Reverse the new mantissa bit string back to MSB->LSB
+    print(f"This is mantissa product sum before reversing to MSB -> LSB and exp overflow check {product_sum}")
+    
     product_sum.reverse()
     
+    print(f"This is mantissa product sum before exp overflow check {product_sum}")
     #Carry the final mantissa overflow into the new exponent
     if product_sum[0] == 1: #Checks if there is mantissa overflow into the exponent by looking at the MSB, if it is 1 the mantissa needs normalization /
                             #(the decimal point must float up and the leading 1 is new hidden bit and only that is discarded)
@@ -3417,6 +3429,22 @@ def float_multiplier(multiplicand: float | int, multiplier: float | int, precisi
         float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
 
         return binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+
+    #Input infinity check and exit upon exponent overflow
+    if n1_bit_lst[1 : exp_len + 1].count(0) == 0 or n2_bit_lst[1 : exp_len + 1].count(0) == 0: #only 1s, no 0s
+        final_exponent: str = ""
+        for bit in range(exp_len):
+            final_exponent += str(bit)
+
+        final_mantissa: str = "0" * mant_len #mantissa must be all 0s
+
+        new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+        final_sign_bit: str = str(new_sign_bit)
+
+        float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+        print(f"This branch got activated {new_exponent} if the input is inf")
+
+        return binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
     
 
     #Separate the exponent and mantissa bits
@@ -3446,7 +3474,7 @@ def float_multiplier(multiplicand: float | int, multiplier: float | int, precisi
 
         nlz_multiplicand += 1 #add the hidden leading 0
 
-    elif num_2_exp.count(1) == 0 and (n2_bit_lst[exp_len + 1 : mant_len].count(1) != 0):
+    if num_2_exp.count(1) == 0 and (n2_bit_lst[exp_len + 1 : mant_len].count(1) != 0):
         subnormal_multiplier: bool = True
         subnormal_num: bool = True
         for bit in multiplier_mantissa:
@@ -3468,37 +3496,23 @@ def float_multiplier(multiplicand: float | int, multiplier: float | int, precisi
     
     elif subnormal_multiplicand == True and subnormal_multiplier == False:
         new_exponent: list[int] = sub_bias(exponent_seq = exponent_sum, bias = (exp_bias + nlz_multiplicand), intermediate_len = intermediate_buffer_len, final_len = exp_len, subnormal = subnormal_num)
-
+        print(f"This branch should be active\n{subnormal_num}\n{subnormal_multiplicand}\n{subnormal_multiplier}\n{nlz_multiplicand}\n{nlz_multiplier}\n{num_1_exp}\n{num_2_exp}\n{exponent_sum}\n{exp_bias}.")
     elif subnormal_multiplicand == False and subnormal_multiplier == True:
         new_exponent: list[int] = sub_bias(exponent_seq = exponent_sum, bias = (exp_bias + nlz_multiplier), intermediate_len = intermediate_buffer_len, final_len = exp_len, subnormal = subnormal_num)
 
     else:
         new_exponent: list[int] = sub_bias(exponent_seq = exponent_sum, bias = exp_bias, intermediate_len = intermediate_buffer_len, final_len = exp_len, subnormal = subnormal_num)
-        
+        print("This should not activate.")
 
-    #Infinity check and exit upon exponent overflow
-    if new_exponent.count(0) == 0: #only 1s, no 0s
-        final_exponent: str = ""
-        for bit in new_exponent:
-            final_exponent += str(bit)
-
-        final_mantissa: str = "0" * mant_len #mantissa must be all 0s
-
-        new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
-        final_sign_bit: str = str(new_sign_bit)
-
-        float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
-        print(f"This branch got activated {new_exponent}")
-
-        return binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
     
+    print(f"Nex exp after summ and sub: {new_exponent}")
 
     #Calculate the new, full length mantissa product and the potential new exponent
     new_exponent, mantissa_product = mant_multiplier(mantissa_1 = multiplicand_mantissa, mantissa_2 = multiplier_mantissa, new_exponent = new_exponent, mantissa_length = mant_len,
                                                      subn_multiplicand = subnormal_multiplicand, subn_multiplier = subnormal_multiplier, nlz_multiplicand = nlz_multiplicand, 
                                                      nlz_multiplier = nlz_multiplier)
 
-
+    print(f"Nex exp after mant multipl and mant. product: {new_exponent}\n{mantissa_product}")
     #Round and trim the new mantissa_product to the proper length and handle potential rounding overflow into the new exponent
     new_extended_mantissa: list[int] = mantissa_product #use the full mantissa product as an extended mantissa for rounding
 
@@ -3515,6 +3529,23 @@ def float_multiplier(multiplicand: float | int, multiplier: float | int, precisi
     mantissa_string: str = extended_mantissa_string[0 : mant_len] #prepare the mantissa for rounding
     
     final_exponent, final_mantissa = float_rounder(exponent = exponent_string, mantissa = mantissa_string, rounding_bits = rounding_bits)
+
+    print(f"Final exp and final mant. after rounding: {final_exponent}\n{final_mantissa}")
+    #Infinity check for the final exponent value and exit upon exponent overflow
+    if final_exponent.rfind("0") == -1: #only 1s, no 0s
+        final_exponent: str = ""
+        for bit in new_exponent:
+            final_exponent += str(bit)
+
+        final_mantissa: str = "0" * mant_len #mantissa must be all 0s
+
+        new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+        final_sign_bit: str = str(new_sign_bit)
+
+        float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+        print(f"This branch got activated {new_exponent} if the final exp is inf")
+
+        return binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
     
 
     #Decide the sign bit using the xor operation
