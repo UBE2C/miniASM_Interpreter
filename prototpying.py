@@ -2941,24 +2941,29 @@ def int_to_bits(input_int: int, bit_len: int = 64) -> list[int]:
 
         return bit_seq
 
-def bit_to_int(input_bits: list[int]) -> int:
+def bit_to_int(input_bits: list[int], signed: bool) -> int:
         """
-        Convert a list of bits to an integer.
+        Convert a list of bits to a signed or unsigned integer by flipping the appropriate bits.
     
         Args:
             input_bits: The bit list to convert
         
         Returns:
-            The integer value represented by the bit list.
+            The integer value represented by the bit list from LSB -> MSB.
         """
         
         bit_string: int = 0
 
         for i, bit in enumerate(input_bits):
-            mask: int = bit << i
-            bit_string = bit_string | mask
+            mask: int = bit << i #create a mask by pushing the given bit to the given position
+            bit_string = bit_string | mask #OR the mash with the bit string
 
-        return bit_string
+        #Check the signed mode
+        if signed == True and input_bits[-1] == 1: #if in signed mode and the sign bit is 1 convert to 2's complement
+            return bit_string - (1 << len(input_bits)) #bit string - the max position value (1024 for 10 bits, 8192 for 13 bits)
+        
+        else:
+            return bit_string
 
 def fp_twos_complement(bit_seq: list[int]) -> list[int]:
         """
@@ -3110,7 +3115,7 @@ def sub_bias(exponent_seq: list[int], bias: int, intermediate_len: int, final_le
 
     print(f"This is the new sequence after sum: {new_seq}")
 
-     #detect a subnormal result in case of a subnormal input which should produce an all 0 exponent by looking at the MSB of the intermediate result (-512/-4096)
+    #detect a subnormal result in case of a subnormal input which should produce an all 0 exponent by looking at the MSB of the intermediate result (-512/-4096)
     if subnormal == True and new_seq[-1] == 1:
         output: list[int] = [0 for _ in range(final_len)] #Subnormal exponent pattern: all 1s
         print(f"This is the new sequence after sum: {new_seq} so this branch should be active")
