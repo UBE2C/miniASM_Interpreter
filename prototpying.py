@@ -3091,6 +3091,7 @@ def sub_bias(exponent_seq: list[int], bias: int, intermediate_len: int, final_le
         bias_seq: list[int] = int_to_bits(input_int = (1 - bias), bit_len = intermediate_len)
         bias_2c: list[int] = bias_seq #as the generated bias is negative, it is already in two's complement form after translation into a bit seq
         print(f"Here is the bias {1 - bias} and the bias in 2c form {bias_2c}")
+
     else:
         bias_seq: list[int] = int_to_bits(input_int = bias, bit_len = intermediate_len)
         bias_2c: list[int] = fp_twos_complement(bit_seq = bias_seq)
@@ -3115,26 +3116,116 @@ def sub_bias(exponent_seq: list[int], bias: int, intermediate_len: int, final_le
 
     print(f"This is the new sequence after sum: {new_seq}")
 
-    #detect a subnormal result in case of a subnormal input which should produce an all 0 exponent by looking at the MSB of the intermediate result (-512/-4096)
-    if subnormal == True and new_seq[-1] == 1:
-        output: list[int] = [0 for _ in range(final_len)] #Subnormal exponent pattern: all 1s
+    #detect a subnormal result by checking if the extended new biased exponent is less than the lowest normal exponent
+    if (bit_to_int(input_bits = new_seq, signed = True) - bias) < (1-bias):
+        output: list[int] = [0 for _ in range(final_len)] #Subnormal exponent pattern: all 0s
         print(f"This is the new sequence after sum: {new_seq} so this branch should be active")
-    
+        output = output[::-1]
+        return output
+
     #detect overflow which should produce an Inf value
-    elif subnormal == False and new_seq[final_len : len(new_seq)].count(1) != 0: #there are 1s over the exponent bit limit
-        output: list[int] = [1 for _ in range(final_len)] #Inf exponent pattern: all 0s
-        print(f"This is the new sequence after sum: {new_seq} so this branch should NOT be active")
+    if subnormal == False and new_seq[final_len : len(new_seq)].count(1) != 0: #there are 1s over the exponent bit limit
+        output: list[int] = [1 for _ in range(final_len)] #Inf exponent pattern: all 1s
+        output = output[::-1]
+        return output
     
     else:
         output: list[int] = new_seq[0:final_len]
-        print(f"This is the new sequence after sum: {new_seq} so this branch NOT should be active")
+        output = output[::-1]
+        return output
     
-    output = output[::-1]
+    
 
-    return output
+
+def sub_bias(exponent_seq: list[int], bias: int, intermediate_len: int, final_len: int, subnormal: bool) -> tuple[list[int], int]:
+    """
+    Subtract the IEEE 754 exponent bias from a biased exponent sum.
+    
+    Removes one bias from the exponent sum (exp1 + exp2 - bias) to get the final
+    exponent for floating-point multiplication. Uses two's complement arithmetic
+    for subtraction with overflow detection.
+    
+    Args:
+        exponent_seq: Biased exponent sum as list of bits in LSB->MSB order
+        bias: IEEE 754 bias value (127 for 32-bit, 1023 for 64-bit)
+        intermediate_len: Bit length of input exponent sequence
+        final_len: Target bit length for final exponent output
+        
+    Returns:
+        Unbiased exponent as list of bits in MSB->LSB order, trimmed to final_len
+        
+    Raises:
+        AluError: If arithmetic overflow is detected during subtraction
+        
+    Notes:
+        - Converts bias to two's complement for subtraction
+        - Trims result from intermediate_len to final_len bits
+        - Reverses output to MSB->LSB order for IEEE 754 format
+    """
+    ###NOTE: PROBLEM HERE, LOOK INTO THIS PART
+    if subnormal == True: #for subnormal numbers we use the Ex + Ey (done before) - (1-[127 + nlz]) formula to get a normalized subnormal exponent
+        bias_seq: list[int] = int_to_bits(input_int = (1 - bias), bit_len = intermediate_len)
+        bias_2c: list[int] = bias_seq #as the generated bias is negative, it is already in two's complement form after translation into a bit seq
+        
+
+    else:
+        bias_seq: list[int] = int_to_bits(input_int = bias, bit_len = intermediate_len)
+        bias_2c: list[int] = fp_twos_complement(bit_seq = bias_seq)
+
+    carry_over: int = 0
+    new_seq: list[int] = []
+    msb_in: int = 0
+
+
+    for bit_index in range(intermediate_len):
+        new_bit: int = 0
+
+        if bit_index == (intermediate_len - 1):
+            msb_in = carry_over
+            
+        new_bit, carry_over = full_adder(input_a = exponent_seq[bit_index], input_b = bias_2c[bit_index], carry_in = carry_over)
+
+        new_seq.append(new_bit)
+
+    if msb_in != carry_over:
+        raise FpuError(message="sub_bias: overflow detected at the end of bias subtraction")
+    
+    #Calculate the new unbiased exponent to check if the result is a subnormal number and define the mantissa shift subnormals
+    biased_new_exponent: int = bit_to_int(input_bits = new_seq, signed = True) #this is the |ex+ey-bias| part of the shift calculation
+    mantissa_shift: int = 0
+    
+    #detect a subnormal result by checking if the extended new biased exponent is less than the lowest normal exponent
+    if biased_new_exponent - bias < (1-bias):
+        output: list[int] = [0 for _ in range(final_len)] #Subnormal exponent pattern: all 0s
+        output = output[::-1]
+        
+        
+        #If the result is subnormal calculate the necessary mantissa shift  using the formula |ex+ey-bias| + 1
+        mantissa_shift: int = abs(biased_new_exponent) + 1
+        mantissa_shift = mantissa_shift
+
+        return output, mantissa_shift
+
+    #detect overflow which should produce an Inf value
+    if subnormal == False and new_seq[final_len : len(new_seq)].count(1) != 0: #there are 1s over the exponent bit limit
+        output: list[int] = [1 for _ in range(final_len)] #Inf exponent pattern: all 1s
+        output = output[::-1]
+        
+
+        return output, mantissa_shift
+    
+    else:
+        output: list[int] = new_seq[0:final_len]
+        output = output[::-1]
+
+
+        return output, mantissa_shift
+
+    
 
 def mant_multiplier(mantissa_1: list[int], mantissa_2: list[int], new_exponent: list[int], mantissa_length: int,
-                     subn_multiplicand: bool, subn_multiplier: bool, nlz_multiplicand: int, nlz_multiplier: int) -> tuple[list[int], list[int]]:
+                     subn_multiplicand: bool, subn_multiplier: bool, nlz_multiplicand: int, nlz_multiplier: int,
+                     subn_result: bool, subn_shift: int) -> tuple[list[int], list[int]]:
     """
     Multiply two IEEE 754 mantissas with hidden bit restoration and overflow handling.
     
@@ -3195,19 +3286,21 @@ def mant_multiplier(mantissa_1: list[int], mantissa_2: list[int], new_exponent: 
         mant_1 = mant_1[nlz_multiplicand : len(mant_1)]
         mant_2 = mant_2[nlz_multiplier : len(mant_2)]
 
-        #pad them to normal length (2nd step ofa left shift)
+        #pad them to normal length (2nd step of a left shift)
         [mant_1.append(0) for _ in range(nlz_multiplicand)]
         [mant_2.append(0) for _ in range(nlz_multiplier)]
     
     elif subn_multiplicand == True and subn_multiplier == False:
         mant_1.insert(0, 0) #subnormal, re-insert a 0
         mant_2.insert(0, 1) #normal, re-insert a 1
+        print(f"sbnormal mant with leading zero added {mant_1}")
 
         #remove the leading 0s to normalize the mantissas (1st step of a left shift)
         mant_1 = mant_1[nlz_multiplicand : len(mant_1)]
-
-        #pad them to normal length (2nd step ofa left shift)
+        print(f"sbnormal mant with leading zero removed {mant_1}")
+        #pad them to normal length (2nd step of a left shift)
         [mant_1.append(0) for _ in range(nlz_multiplicand)]
+        print(f"sbnormal mant with leading zero removed and padded {mant_1}")
 
     elif subn_multiplier == True and subn_multiplicand == False:
         mant_1.insert(0, 1) #normal, re-insert a 1
@@ -3216,7 +3309,7 @@ def mant_multiplier(mantissa_1: list[int], mantissa_2: list[int], new_exponent: 
         #remove the leading 0s to normalize the mantissas (1st step of a left shift)
         mant_2 = mant_2[nlz_multiplier : len(mant_2)]
 
-        #pad them to normal length (2nd step ofa left shift)
+        #pad them to normal length (2nd step of a left shift)
         [mant_2.append(0) for _ in range(nlz_multiplier)]
 
     else:
@@ -3281,6 +3374,13 @@ def mant_multiplier(mantissa_1: list[int], mantissa_2: list[int], new_exponent: 
     
     product_sum.reverse()
     
+    if subn_result == True:
+        #Check if the final output is a subnormal, if yes shift the mantissa accordingly
+        for _ in range(subn_shift): #this will shift the bits string to the right, filling it with zeros
+            product_sum.pop()
+            product_sum.insert(0, 0)
+        
+
     print(f"This is mantissa product sum before exp overflow check {product_sum}")
     #Carry the final mantissa overflow into the new exponent
     if product_sum[0] == 1: #Checks if there is mantissa overflow into the exponent by looking at the MSB, if it is 1 the mantissa needs normalization /
@@ -3497,25 +3597,31 @@ def float_multiplier(multiplicand: float | int, multiplier: float | int, precisi
     #NOTE: for subnormal numbers the exponent bias will be 1 - (bias (-126 or -1022) + number of leading zeros) which should not effect normal number calculations as /
     #  1-bias is on a different if branch while nlz will be 0 for a normal number
     if subnormal_multiplicand == True and subnormal_multiplier == True:
-        new_exponent: list[int] = sub_bias(exponent_seq = exponent_sum, bias = (exp_bias + nlz_multiplicand + nlz_multiplier), intermediate_len = intermediate_buffer_len, final_len = exp_len, subnormal = subnormal_num)
+        new_exponent, mantissa_shift = sub_bias(exponent_seq = exponent_sum, bias = (exp_bias + nlz_multiplicand + nlz_multiplier), intermediate_len = intermediate_buffer_len, final_len = exp_len, subnormal = subnormal_num)
     
     elif subnormal_multiplicand == True and subnormal_multiplier == False:
-        new_exponent: list[int] = sub_bias(exponent_seq = exponent_sum, bias = (exp_bias + nlz_multiplicand), intermediate_len = intermediate_buffer_len, final_len = exp_len, subnormal = subnormal_num)
+        new_exponent, mantissa_shift = sub_bias(exponent_seq = exponent_sum, bias = (exp_bias + nlz_multiplicand), intermediate_len = intermediate_buffer_len, final_len = exp_len, subnormal = subnormal_num)
         print(f"This branch should be active\n{subnormal_num}\n{subnormal_multiplicand}\n{subnormal_multiplier}\n{nlz_multiplicand}\n{nlz_multiplier}\n{num_1_exp}\n{num_2_exp}\n{exponent_sum}\n{exp_bias}.")
     elif subnormal_multiplicand == False and subnormal_multiplier == True:
-        new_exponent: list[int] = sub_bias(exponent_seq = exponent_sum, bias = (exp_bias + nlz_multiplier), intermediate_len = intermediate_buffer_len, final_len = exp_len, subnormal = subnormal_num)
+        new_exponent, mantissa_shift = sub_bias(exponent_seq = exponent_sum, bias = (exp_bias + nlz_multiplier), intermediate_len = intermediate_buffer_len, final_len = exp_len, subnormal = subnormal_num)
 
     else:
-        new_exponent: list[int] = sub_bias(exponent_seq = exponent_sum, bias = exp_bias, intermediate_len = intermediate_buffer_len, final_len = exp_len, subnormal = subnormal_num)
-        print("This should not activate.")
+        new_exponent, mantissa_shift = sub_bias(exponent_seq = exponent_sum, bias = exp_bias, intermediate_len = intermediate_buffer_len, final_len = exp_len, subnormal = subnormal_num)
+        print("This should not activate if we expect a subnormal.")
 
     
     print(f"Nex exp after summ and sub: {new_exponent}")
+    #Check if we got a subnormal product during exponent calculation
+    subnormal_product: bool = False
+    if new_exponent.count(1) == 0:
+        subnormal_product = True
+
+    print(f"this is the mantissa shift if the product is subnormal: {mantissa_shift}")
 
     #Calculate the new, full length mantissa product and the potential new exponent
     new_exponent, mantissa_product = mant_multiplier(mantissa_1 = multiplicand_mantissa, mantissa_2 = multiplier_mantissa, new_exponent = new_exponent, mantissa_length = mant_len,
                                                      subn_multiplicand = subnormal_multiplicand, subn_multiplier = subnormal_multiplier, nlz_multiplicand = nlz_multiplicand, 
-                                                     nlz_multiplier = nlz_multiplier)
+                                                     nlz_multiplier = nlz_multiplier, subn_result = subnormal_product, subn_shift = mantissa_shift)
 
     print(f"Nex exp after mant multipl and mant. product: {new_exponent}\n{mantissa_product}")
     #Round and trim the new mantissa_product to the proper length and handle potential rounding overflow into the new exponent
@@ -3533,9 +3639,14 @@ def float_multiplier(multiplicand: float | int, multiplier: float | int, precisi
     rounding_bits: str = extended_mantissa_string[mant_len : (mant_len + 5)] #prepare the extra bits for rounding
     mantissa_string: str = extended_mantissa_string[0 : mant_len] #prepare the mantissa for rounding
     
+    print(f"This is the mantissa before subnormal shift {mantissa_string}")
+    
+
+    print(f"This is the mantissa after subnormal shift {mantissa_string}")
+    #Round the exponent and mantissa
     final_exponent, final_mantissa = float_rounder(exponent = exponent_string, mantissa = mantissa_string, rounding_bits = rounding_bits)
 
-    print(f"Final exp and final mant. after rounding: {final_exponent}\n{final_mantissa}")
+    print(f"Final exp and final mant. after rounding and subnormal shifting: {final_exponent}\n{final_mantissa}")
     #Infinity check for the final exponent value and exit upon exponent overflow
     if final_exponent.rfind("0") == -1: #only 1s, no 0s
         final_exponent: str = ""
