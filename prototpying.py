@@ -3320,7 +3320,7 @@ def sub_bias(exponent_seq: list[int], bias: int, intermediate_len: int, final_le
         raise FpuError(message="sub_bias: overflow detected at the end of bias subtraction")
     
     #Calculate the new unbiased exponent to check if the result is a subnormal number and define the mantissa shift subnormals
-    biased_new_exponent: int = bit_to_int(input_bits = new_seq, signed = True) #this is the |ex+ey-bias| part of the shift calculation
+    biased_new_exponent: int = bit_to_int(input_bits = new_seq, signed = False) #this is the |ex+ey-bias| part of the shift calculation
     mantissa_shift: int = 0
     
     #detect a subnormal result by checking if the extended new biased exponent is less than the lowest normal exponent
@@ -3858,12 +3858,12 @@ def sub_biased_exponents(exponent_1: list[int], exponent_2: list[int], intermedi
         exp_1.extend([0 for _ in range(intermediate_len - len(exp_1))])
         exp_2.extend([0 for _ in range(intermediate_len - len(exp_2))])
 
-    
+    print(exp_1, exp_2)
 
     #Transform the second exponent to two's complement
     exp_2: list[int] = fp_twos_complement(bit_seq = exp_2)
 
-    
+    print(exp_2)
 
     #Declare variables
     new_seq: list[int] = []
@@ -3906,7 +3906,7 @@ def add_bias(exponent_seq: list[int], bias: int, intermediate_len: int, final_le
         if subnormal_dividend == True and subnormal_divisor == False:
             #the dividend is subnormal, formula:  - [Ex - Ey (done before)] + 1 + bias + nlz_dividend
             bias_seq: list[int] = int_to_bits(input_int = (1 + bias), bit_len = intermediate_len)
-            bias_seq: list[int] = fp_twos_complement(bit_seq = bias_seq)
+            exp: list[int] = fp_twos_complement(bit_seq = exp)
             shift: list[int] = int_to_bits(input_int = nlz_dividend, bit_len = intermediate_len)
 
         elif subnormal_dividend == False and subnormal_divisor == True:
@@ -3933,15 +3933,10 @@ def add_bias(exponent_seq: list[int], bias: int, intermediate_len: int, final_le
         if bit_index == (intermediate_len - 1):
             msb_in: int = carry_over
 
-        if bit_index == 0:
-            new_bit, carry_over = full_adder(input_a = exp[bit_index], input_b = bias_seq[bit_index], carry_in = 0)
-
         new_bit, carry_over = full_adder(input_a = exp[bit_index], input_b = bias_seq[bit_index], carry_in = carry_over)
 
         new_seq.append(new_bit)
     
-    
-
     #Check for overflow
     if msb_in != carry_over:
         raise FpuError(message="add_bias: overflow detected at the end of adding the bias")
@@ -3957,9 +3952,6 @@ def add_bias(exponent_seq: list[int], bias: int, intermediate_len: int, final_le
 
             if bit_index == (intermediate_len - 1):
                 msb_in: int = carry_over
-
-            if bit_index == 0:
-                new_bit, carry_over = full_adder(input_a = new_seq[bit_index], input_b = shift[bit_index], carry_in = 0)
             
             new_bit, carry_over = full_adder(input_a = new_seq[bit_index], input_b = shift[bit_index], carry_in = carry_over)
 
@@ -3973,7 +3965,7 @@ def add_bias(exponent_seq: list[int], bias: int, intermediate_len: int, final_le
         new_seq: list[int] = shifted_exponent
 
     #Calculate the new exponent to check if the result is a subnormal number and define the mantissa shift subnormals
-    biased_new_exponent: int = bit_to_int(input_bits = new_seq, signed = True) #this is the |ex-ey+bias| part of the shift calculation
+    biased_new_exponent: int = bit_to_int(input_bits = new_seq, signed = False) #this is the |Ex-Ey+bias| part of the shift calculation
     mantissa_shift: int = 0
     
     
@@ -3982,7 +3974,7 @@ def add_bias(exponent_seq: list[int], bias: int, intermediate_len: int, final_le
         output: list[int] = [0 for _ in range(final_len)] #Subnormal exponent pattern: all 0s
         output: list[int] = output[::-1]
         
-        #If the result is subnormal calculate the necessary mantissa shift  using the formula |ex-ey+bias| + 1
+        #If the result is subnormal calculate the necessary mantissa shift  using the formula |Ex-Ey+bias| + 1
         mantissa_shift: int = abs(biased_new_exponent) + 1
 
         return output, mantissa_shift

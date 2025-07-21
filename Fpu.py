@@ -729,7 +729,7 @@ class FPU_multiplier_divider:
             raise FpuError(message="sub_bias: overflow detected at the end of bias subtraction")
         
         #Calculate the new unbiased exponent to check if the result is a subnormal number and define the mantissa shift subnormals
-        biased_new_exponent: int = self.bit_to_int(input_bits = new_seq, signed = True) #this is the |ex+ey-bias| part of the shift calculation
+        biased_new_exponent: int = self.bit_to_int(input_bits = new_seq, signed = False) #this is the |ex+ey-bias| part of the shift calculation
         mantissa_shift: int = 0
         
         #detect a subnormal result by checking if the extended new biased exponent is less than the lowest normal exponent
