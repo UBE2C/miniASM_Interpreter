@@ -229,7 +229,7 @@ class Alu:
         self.AU: AU = AU()
 
         
-        self.numeric_operations: set[str] = {"add", "sub", "mul", "idiv", "fdiv", "mod", "inc", "dec"}
+        self.numeric_operations: set[str] = {"add", "sub", "mul", "idiv", "mod", "inc", "dec"}
         self.char_operations_out: set[str] = {"add", "sub", "mul", "idiv"}
         self.logical_operations_out: set[str] = {"eq", "neq", "gt", "ge", "lt", "le"}
         self.bitwise_operations_out: set[str] = {"and", "or", "xor", "not", "ls", "rs"}

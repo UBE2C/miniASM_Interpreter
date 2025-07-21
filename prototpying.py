@@ -3331,7 +3331,7 @@ def sub_bias(exponent_seq: list[int], bias: int, intermediate_len: int, final_le
         
         #If the result is subnormal calculate the necessary mantissa shift  using the formula |ex+ey-bias| + 1
         mantissa_shift: int = abs(biased_new_exponent) + 1
-        mantissa_shift = mantissa_shift
+        #mantissa_shift = mantissa_shift
 
         return output, mantissa_shift
 
