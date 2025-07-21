@@ -3842,4 +3842,162 @@ def float_multiplier(multiplicand: float | int, multiplier: float | int, precisi
 
 
 
+#NOTE: Floating point division unique internal methods start here
+def sub_biased_exponents(exponent_1: list[int], exponent_2: list[int], intermediate_len: int) -> list[int]:
+    #Transfer ownership of the exponents
+    exp_1: list[int] = exponent_1.copy()
+    exp_2: list[int] = exponent_2.copy()
 
+    #MSB -> LSB to LSB -> MSB conversion for easier calculations
+    exp_1.reverse()
+    exp_2.reverse()
+
+    
+    #Pad the exponents to the intermediate bit length 
+    if len(exp_1) != intermediate_len or len(exp_2) != intermediate_len:
+        exp_1.extend([0 for _ in range(intermediate_len - len(exp_1))])
+        exp_2.extend([0 for _ in range(intermediate_len - len(exp_2))])
+
+    
+
+    #Transform the second exponent to two's complement
+    exp_2: list[int] = fp_twos_complement(bit_seq = exp_2)
+
+    
+
+    #Declare variables
+    new_seq: list[int] = []
+    carry_over: int = 0
+    msb_in: int = 0
+
+    #Carry out the subtraction
+    for bit_index in range(intermediate_len):
+        new_bit: int = 0
+
+        if bit_index == (intermediate_len - 1):
+                msb_in: int = carry_over
+            
+        new_bit, carry_over = full_adder(input_a = exp_1[bit_index], input_b = exp_2[bit_index], carry_in = carry_over)
+            
+        new_seq.append(new_bit)
+
+    #Check for overflow
+    if msb_in != carry_over:
+        raise FpuError(message="sub_biased_exponents: overflow detected at the end of exponent subtraction")
+
+    return new_seq
+        
+
+def add_bias(exponent_seq: list[int], bias: int, intermediate_len: int, final_len: int, subnormal: bool, subnormal_dividend: bool,
+             subnormal_divisor: bool, nlz_dividend: int, nlz_divisor: int) -> tuple[list[int], int]:
+    #Borrow the new exponent seq
+    exp: list[int] = exponent_seq.copy()
+
+    #Set up exponent calculation based on the presence of subnormal operands the general formula is Ex-Ey+bias+Shift (Shift given by nlz)
+    #NOTE: all the bias sequences for the subnormal numbers are adjusted bias sequences incorporating a +1 or -1 respectively
+    if subnormal == False: 
+        #no subnormals, formula: [Ex - Ey (done before)] + bias
+        bias_seq: list[int] = int_to_bits(input_int = bias, bit_len = intermediate_len)
+        #in the case of normal numbers there is no additional shift but I declare it to stop the language server from complaining
+        shift: list[int] = int_to_bits(input_int = 0, bit_len = intermediate_len) 
+        
+
+    else: 
+        if subnormal_dividend == True and subnormal_divisor == False:
+            #the dividend is subnormal, formula:  - [Ex - Ey (done before)] + 1 + bias + nlz_dividend
+            bias_seq: list[int] = int_to_bits(input_int = (1 + bias), bit_len = intermediate_len)
+            bias_seq: list[int] = fp_twos_complement(bit_seq = bias_seq)
+            shift: list[int] = int_to_bits(input_int = nlz_dividend, bit_len = intermediate_len)
+
+        elif subnormal_dividend == False and subnormal_divisor == True:
+            #the divisor is subnormal, formula: [Ex - Ey (done before)] − 1 + bias + nlz_divisor
+            bias_seq: list[int] = int_to_bits(input_int = (-1 + bias), bit_len = intermediate_len)
+            shift: list[int] = int_to_bits(input_int = nlz_divisor, bit_len = intermediate_len)
+
+        elif subnormal_dividend == True and subnormal_divisor == True:
+            #the divisor and dividend are subnormals, formula: bias + (nlz_dividend - nlz_divisor)
+            bias_seq: list[int] = int_to_bits(input_int = bias, bit_len = intermediate_len)
+            shift: list[int] = int_to_bits(input_int = (nlz_dividend - nlz_divisor), bit_len = intermediate_len)
+
+        else:
+            raise FpuError(message = f"add_bias: subnormal operand detected when none was supplied: subnormal {subnormal}")
+
+    #Declare variables
+    new_seq: list[int] = []
+    carry_over: int = 0
+    msb_in: int = 0
+
+    for bit_index in range(intermediate_len):
+        new_bit: int = 0
+
+        if bit_index == (intermediate_len - 1):
+            msb_in: int = carry_over
+
+        if bit_index == 0:
+            new_bit, carry_over = full_adder(input_a = exp[bit_index], input_b = bias_seq[bit_index], carry_in = 0)
+
+        new_bit, carry_over = full_adder(input_a = exp[bit_index], input_b = bias_seq[bit_index], carry_in = carry_over)
+
+        new_seq.append(new_bit)
+    
+    
+
+    #Check for overflow
+    if msb_in != carry_over:
+        raise FpuError(message="add_bias: overflow detected at the end of adding the bias")
+    
+    #shift if subnormal!
+    if subnormal == True:
+        shifted_exponent: list[int] = []
+        carry_over: int = 0
+        msb_in: int = 0
+
+        for bit_index in range(intermediate_len):
+            new_bit: int = 0
+
+            if bit_index == (intermediate_len - 1):
+                msb_in: int = carry_over
+
+            if bit_index == 0:
+                new_bit, carry_over = full_adder(input_a = new_seq[bit_index], input_b = shift[bit_index], carry_in = 0)
+            
+            new_bit, carry_over = full_adder(input_a = new_seq[bit_index], input_b = shift[bit_index], carry_in = carry_over)
+
+            shifted_exponent.append(new_bit)
+
+        #Check for overflow
+        if msb_in != carry_over:
+            raise FpuError(message="add_biased: overflow detected at the end of exponent shift due to subnormal operands")
+
+        #Swap the new exponent seq to the shifted exponent in the case of subnormal operands
+        new_seq: list[int] = shifted_exponent
+
+    #Calculate the new exponent to check if the result is a subnormal number and define the mantissa shift subnormals
+    biased_new_exponent: int = bit_to_int(input_bits = new_seq, signed = True) #this is the |ex-ey+bias| part of the shift calculation
+    mantissa_shift: int = 0
+    
+    
+    #detect a subnormal result by checking if the extended new biased exponent is less than the lowest normal exponent
+    if biased_new_exponent - bias < (1-bias):
+        output: list[int] = [0 for _ in range(final_len)] #Subnormal exponent pattern: all 0s
+        output: list[int] = output[::-1]
+        
+        #If the result is subnormal calculate the necessary mantissa shift  using the formula |ex-ey+bias| + 1
+        mantissa_shift: int = abs(biased_new_exponent) + 1
+
+        return output, mantissa_shift
+
+    #detect overflow which should produce an Inf value
+    if subnormal == False and new_seq[final_len : len(new_seq)].count(1) != 0: #there are 1s over the exponent bit limit
+        output: list[int] = [1 for _ in range(final_len)] #Inf exponent pattern: all 1s
+        output: list[int] = output[::-1]
+        
+
+        return output, mantissa_shift
+    
+    else:
+        output: list[int] = new_seq[0:final_len]
+        output: list[int] = output[::-1]
+
+
+        return output, mantissa_shift
