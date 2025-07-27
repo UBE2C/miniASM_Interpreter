@@ -1035,12 +1035,15 @@ class FPU_multiplier_divider:
         else: 
             if subnormal_dividend == True and subnormal_divisor == False:
                 #the dividend is subnormal, formula:  - [Ex - Ey (done before)] + 1 + bias + nlz_dividend
+                #final formula 1 - Ey + bias + nlz_dividend (only -Ey because in Ex - Ey, Ex is all 0s => Ex - Ey = -Ey)
                 bias_seq: list[int] = self.int_to_bits(input_int = (1 + bias), bit_len = intermediate_len)
-                bias_seq: list[int] = self.fp_twos_complement(bit_seq = bias_seq)
+                exp: list[int] = self.fp_twos_complement(bit_seq = exp)
                 shift: list[int] = self.int_to_bits(input_int = nlz_dividend, bit_len = intermediate_len)
 
             elif subnormal_dividend == False and subnormal_divisor == True:
                 #the divisor is subnormal, formula: [Ex - Ey (done before)] − 1 + bias + nlz_divisor
+                #final formula Ex -1 + bias + nlz_dividend (only Ex because in Ex - Ey, Ey is all 0s => Ex - Ey = Ex)
+                #the -1 come from the full formula (Ex-bias) - (1-bias [which is subnormal Ey]) + bias = Ex - bias -1 + bias + bias
                 bias_seq: list[int] = self.int_to_bits(input_int = (-1 + bias), bit_len = intermediate_len)
                 shift: list[int] = self.int_to_bits(input_int = nlz_divisor, bit_len = intermediate_len)
 
@@ -1057,6 +1060,7 @@ class FPU_multiplier_divider:
         carry_over: int = 0
         msb_in: int = 0
 
+        #add the bias to the exponent
         for bit_index in range(intermediate_len):
             new_bit: int = 0
 
@@ -1071,7 +1075,7 @@ class FPU_multiplier_divider:
         if msb_in != carry_over:
             raise FpuError(message="add_bias: overflow detected at the end of adding the bias")
         
-        #shift if subnormal!
+        #shift if subnormal! (add the shift)
         if subnormal == True:
             shifted_exponent: list[int] = []
             carry_over: int = 0
@@ -1095,7 +1099,7 @@ class FPU_multiplier_divider:
             new_seq: list[int] = shifted_exponent
 
         #Calculate the new exponent to check if the result is a subnormal number and define the mantissa shift subnormals
-        biased_new_exponent: int = self.bit_to_int(input_bits = new_seq, signed = True) #this is the |ex-ey+bias| part of the shift calculation
+        biased_new_exponent: int = self.bit_to_int(input_bits = new_seq, signed = False) #this is the |ex-ey+bias| part of the shift calculation
         mantissa_shift: int = 0
         
         #detect a subnormal result by checking if the extended new biased exponent is less than the lowest normal exponent
