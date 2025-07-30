@@ -3993,3 +3993,149 @@ def add_bias(exponent_seq: list[int], bias: int, intermediate_len: int, final_le
 
 
         return output, mantissa_shift
+
+
+def long_div_subtract(num1: list[int], num2: list[int]) -> tuple[int, list[int]]:
+    """
+    Takes unsigned inputs in MSB -> LSB order and adds a sign bit.
+    Returns an unsigned bit sequence in MSB -> LSB order by chopping off the sing bit.
+    Used for both operand magnitude comparison and subtraction during long division.
+    This subtraction method is only suitable for use in a long division algorithm!
+    """
+    
+    #Borrow the arguments
+    n1: list[int] = num1.copy()
+    n2: list[int] = num2.copy()
+
+    #Extend the input numbers with sign bits
+    n1.insert(0, 0)
+    n2.insert(0, 0)
+
+    #adjust the bit length
+    if len(n1) < len(n2):
+        for _ in range((len(n2) - len(n1))):
+            n1.insert(0, 0)
+    
+    elif len(n1) > len(n2):
+        for _ in range((len(n1) - len(n2))):
+            n2.insert(0, 0)
+
+    else:
+        pass
+
+    #Reverse the bit order to LSB -> MSB
+    n1.reverse()
+    n2.reverse()
+
+    n2_2c: list[int] = fp_twos_complement(bit_seq = n2)
+
+    #Declare variables
+    new_seq: list[int] = []
+    carry_over: int = 0
+    msb_in: int = 0
+
+    #Subtraction loop based on a full adder and two's complement
+    for bit_index in range(len(n1)):
+        new_bit: int = 0
+
+        if bit_index == ((len(n1) - 1)):
+            msb_in: int = carry_over
+
+        new_bit, carry_over = full_adder(input_a = n1[bit_index], input_b = n2_2c[bit_index], carry_in = carry_over)
+
+        new_seq.append(new_bit)
+
+    #Check for overflow
+    if msb_in != carry_over:
+        raise FpuError(message="long_div_subtract: overflow detected while subtracting during long division")
+    
+    #Reverse the bit order to MSB -> LSB
+    new_seq.reverse()
+
+    #Extract the sing bit
+    sign_bit: int = new_seq[0]
+
+    return sign_bit, new_seq[1:]
+
+
+def long_divider(dividend: list[int], divisor: list[int], bit_len: int) -> tuple[list[int], list[int]]:
+    """
+    Does a long division based on the inputs bit lists.
+    The dividend and divisor must be ordered MSB -> LSB, and the bit_len determines the output length.
+    Returns the quotient and the remainder in an MSB -> LSB order.
+    """
+    
+    #Borrow the dividend 
+    num_1: list[int] = dividend.copy()
+
+    #Pad the dividend to the extended length
+    if len(num_1) < bit_len:
+        for bit in range(bit_len - len(num_1)):
+            num_1.insert(0, 0)
+
+    #Cut the divisor to the first MSB
+    
+    #Declare the necessary variables
+    quotient: list[int] = []
+    remainder: list[int] = []
+
+    #Division loop
+    for bit_index, bit in enumerate(num_1):
+        #print(f"Before append: remainder = {remainder}")
+        remainder.append(bit)
+
+        #Subtraction for comparison (dividend >= divider or dividend < divider) and for division subtraction
+        sign, temp_remainder = long_div_subtract(num1 = remainder, num2 = divisor) 
+
+        #Decide if the remainder is divisible
+        if sign == 1:
+            quotient.append(0)
+            
+        else:
+            quotient.append(1)
+            remainder: list[int] = temp_remainder[(bit_len - (bit_index + 1)):] #temp reminder is cut to the actual length based on the position (bit index +1 because slicing from is exclusive)
+            
+        
+    return quotient, remainder
+
+def fp_long_divider(dividend: list[int], divisor: list[int], bit_len: int) -> tuple[list[int], list[int]]:
+    """
+    Does a long division of the mantissa sequences based on the inputs bit lists.
+    The dividend and divisor must be ordered MSB -> LSB, and the bit_len determines the output length.
+    Returns the quotient and the remainder in an MSB -> LSB order.
+    This long divider is only suitable for use in mantissa division due to the dividend padding applied!
+    """
+
+    #Borrow the dividend 
+    num_1: list[int] = dividend.copy()
+
+    #Pad the dividend to the extended length
+    if len(num_1) < bit_len:
+        for bit in range(bit_len - len(num_1)):
+            num_1.append(0) #mantissa sequences have to be padded at the end
+
+    #Cut the divisor to the first MSB
+
+    #Declare the necessary variables
+    quotient: list[int] = [] #will serve as the new mantissa
+    remainder: list[int] = [] #will serve as the sticky bits during rounding
+
+    #Division loop
+    for bit_index, bit in enumerate(num_1):
+        #print(f"Before append: remainder = {remainder}")
+        remainder.append(bit)
+
+        #Subtraction for comparison (dividend >= divider or dividend < divider) and for division subtraction
+        sign, temp_remainder = long_div_subtract(num1 = remainder, num2 = divisor) 
+
+        #Decide if the remainder is divisible
+        if sign == 1:
+            quotient.append(0)
+            
+        else:
+            quotient.append(1)
+            remainder: list[int] = temp_remainder[(bit_len - (bit_index + 1)):] #temp reminder is cut to the actual length based on the position (bit index +1 because slicing from is exclusive)
+            
+        
+    return quotient, remainder
+
