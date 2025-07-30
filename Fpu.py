@@ -857,7 +857,7 @@ class FPU_multiplier_divider:
             #pad them to normal length (2nd step of a left shift)
             [mant_1.append(0) for _ in range(nlz_multiplicand)]
 
-        elif subn_multiplier == True and subn_multiplicand == False:
+        elif subn_multiplicand == False and subn_multiplier == True:
             mant_1.insert(0, 1) #normal, re-insert a 1
             mant_2.insert(0, 0) #subnormal, re-insert a 0
 

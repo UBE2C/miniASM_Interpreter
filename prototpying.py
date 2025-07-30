@@ -4093,7 +4093,7 @@ def long_divider(dividend: list[int], divisor: list[int], bit_len: int) -> tuple
             
         else:
             quotient.append(1)
-            remainder: list[int] = temp_remainder[(bit_len - (bit_index + 1)):] #temp reminder is cut to the actual length based on the position (bit index +1 because slicing from is exclusive)
+            remainder: list[int] = temp_remainder[(bit_len - (bit_index + 1)):] #temp reminder is cut to the actual length based on the position (bit index +1 because 0 notation)
             
         
     return quotient, remainder
@@ -4134,8 +4134,69 @@ def fp_long_divider(dividend: list[int], divisor: list[int], bit_len: int) -> tu
             
         else:
             quotient.append(1)
-            remainder: list[int] = temp_remainder[(bit_len - (bit_index + 1)):] #temp reminder is cut to the actual length based on the position (bit index +1 because slicing from is exclusive)
+            remainder: list[int] = temp_remainder[(bit_len - (bit_index + 1)):] #temp reminder is cut to the actual length based on the position (bit index +1 because 0 notation)
             
         
     return quotient, remainder
 
+
+def mantissa_divider(mantissa_1: list[int], mantissa_2: list[int], new_exponent: list[int], mantissa_length: int,
+                         subn_dividend: bool, subn_divisor: bool, nlz_dividend: int, nlz_divisor: int,
+                         subn_result: bool, subn_shift: int) -> tuple[list[int], list[int]]:
+    """
+
+    """
+
+    #Borrow the mantissa and exponent sequences
+    mant_1: list[int] = mantissa_1.copy()
+    mant_2: list[int] = mantissa_2.copy()
+    exp: list[int] = new_exponent.copy()
+
+    #Check if there is a subnormal number and re-insert the hidden 0 or 1 into the mantissa sequences accordingly
+    if subn_dividend == True and subn_divisor == True:
+        mant_1.insert(0, 0) #subnormal, re-insert a 0
+        mant_2.insert(0, 0) #subnormal, re-insert a 0
+
+        #remove the leading 0s to normalize the mantissas (1st step of a left shift)
+        mant_1 = mant_1[nlz_dividend : len(mant_1)]
+        mant_2 = mant_2[nlz_divisor : len(mant_2)]
+
+        #pad them to normal length (2nd step of a left shift)
+        [mant_1.append(0) for _ in range(nlz_dividend)]
+        [mant_2.append(0) for _ in range(nlz_divisor)]
+    
+    elif subn_dividend == True and subn_divisor == False:
+        mant_1.insert(0, 0) #subnormal, re-insert a 0
+        mant_2.insert(0, 1) #normal, re-insert a 1
+
+        #remove the leading 0s to normalize the mantissas (1st step of a left shift)
+        mant_1 = mant_1[nlz_dividend : len(mant_1)]
+        
+        #pad them to normal length (2nd step of a left shift)
+        [mant_1.append(0) for _ in range(nlz_dividend)]
+
+    elif subn_dividend == False and subn_divisor == True:
+        mant_1.insert(0, 1) #normal, re-insert a 1
+        mant_2.insert(0, 0) #subnormal, re-insert a 0
+
+        #remove the leading 0s to normalize the mantissas (1st step of a left shift)
+        mant_2 = mant_2[nlz_divisor : len(mant_2)]
+
+        #pad them to normal length (2nd step of a left shift)
+        [mant_2.append(0) for _ in range(nlz_divisor)]
+
+    else:
+        mant_1.insert(0, 1) #normal, re-insert a 1
+        mant_2.insert(0, 1) #normal, re-insert a 1
+
+    #Extend the mantissa length for rounding (guard and rounding bit)
+    extended_len: int = mantissa_length + 2
+
+    print(mant_1, mant_2)
+
+    #Divide the mantissas
+    new_mantissa, sticky_bits = fp_long_divider(dividend = mant_1, divisor = mant_2, bit_len = extended_len)
+
+    print(new_mantissa, sticky_bits)
+
+    return new_mantissa, exp
