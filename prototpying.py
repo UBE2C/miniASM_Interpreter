@@ -4093,7 +4093,7 @@ def long_divider(dividend: list[int], divisor: list[int], bit_len: int) -> tuple
             
         else:
             quotient.append(1)
-            remainder: list[int] = temp_remainder[(bit_len - (bit_index + 1)):] #temp reminder is cut to the actual length based on the position (bit index +1 because 0 notation)
+            remainder: list[int] = temp_remainder
             
         
     return quotient, remainder
@@ -4134,7 +4134,7 @@ def fp_long_divider(dividend: list[int], divisor: list[int], bit_len: int) -> tu
             
         else:
             quotient.append(1)
-            remainder: list[int] = temp_remainder[(bit_len - (bit_index + 1)):] #temp reminder is cut to the actual length based on the position (bit index +1 because 0 notation)
+            remainder: list[int] = temp_remainder
             
         
     return quotient, remainder
@@ -4142,7 +4142,7 @@ def fp_long_divider(dividend: list[int], divisor: list[int], bit_len: int) -> tu
 
 def mantissa_divider(mantissa_1: list[int], mantissa_2: list[int], new_exponent: list[int], mantissa_length: int,
                          subn_dividend: bool, subn_divisor: bool, nlz_dividend: int, nlz_divisor: int,
-                         subn_result: bool, subn_shift: int) -> tuple[list[int], list[int]]:
+                         subn_result: bool, subn_shift: int) -> tuple[list[int], list[int], list[int]]:
     """
 
     """
@@ -4158,8 +4158,8 @@ def mantissa_divider(mantissa_1: list[int], mantissa_2: list[int], new_exponent:
         mant_2.insert(0, 0) #subnormal, re-insert a 0
 
         #remove the leading 0s to normalize the mantissas (1st step of a left shift)
-        mant_1 = mant_1[nlz_dividend : len(mant_1)]
-        mant_2 = mant_2[nlz_divisor : len(mant_2)]
+        mant_1 = mant_1[nlz_dividend: len(mant_1)]
+        mant_2 = mant_2[nlz_divisor: len(mant_2)]
 
         #pad them to normal length (2nd step of a left shift)
         [mant_1.append(0) for _ in range(nlz_dividend)]
@@ -4180,23 +4180,274 @@ def mantissa_divider(mantissa_1: list[int], mantissa_2: list[int], new_exponent:
         mant_2.insert(0, 0) #subnormal, re-insert a 0
 
         #remove the leading 0s to normalize the mantissas (1st step of a left shift)
-        mant_2 = mant_2[nlz_divisor : len(mant_2)]
+        mant_2 = mant_2[nlz_divisor: len(mant_2)]
 
         #pad them to normal length (2nd step of a left shift)
         [mant_2.append(0) for _ in range(nlz_divisor)]
+
+        print(mant_2)
 
     else:
         mant_1.insert(0, 1) #normal, re-insert a 1
         mant_2.insert(0, 1) #normal, re-insert a 1
 
     #Extend the mantissa length for rounding (guard and rounding bit)
-    extended_len: int = mantissa_length + 2
-
-    print(mant_1, mant_2)
+    extended_len: int = 2 * (mantissa_length + 2)
+    
 
     #Divide the mantissas
     new_mantissa, sticky_bits = fp_long_divider(dividend = mant_1, divisor = mant_2, bit_len = extended_len)
+    
+    new_mantissa: list[int] = new_mantissa[mantissa_length :] #left shift the mantissa to discard the leading zeros coming from the long division
+    
 
-    print(new_mantissa, sticky_bits)
+    if subn_result == True:
+        
+        #Normalize the significand if needed
+        if new_mantissa[0] == 0: #if the new mantissa starts with a 0 do a left shift to normalize it
+            #Mantissa left shift
+            new_mantissa: list[int] = new_mantissa[1:]
+            new_mantissa.append(0)
 
-    return new_mantissa, exp
+            # This should ALWAYS be true for correct division
+            if new_mantissa[0] != 1:
+                raise FpuError(f"mantissa_divider: division error, expected 1 after normalization, got {new_mantissa[0]}")
+            
+            #Adjust the exponent
+            exp: list[int] = long_div_subtract(num1 = exp, num2 = [1])[1] #decrement the exponent by one due to the left shift (moving the decimal point to the right)
+
+        for _ in range(subn_shift): #if the result is subnormal shift the mantissa to the right with the previously calculated positions (|Ex-Ey+bias| + 1)
+            new_mantissa.pop()
+            new_mantissa.insert(0, 0)
+
+
+    else: 
+        if new_mantissa[0] == 0: #if the new mantissa starts with a 0 do a left shift to normalize it
+            #Mantissa left shift
+            new_mantissa: list[int] = new_mantissa[1:]
+            new_mantissa.append(0)
+
+            # This should ALWAYS be true for correct division
+            if new_mantissa[0] != 1:
+                raise FpuError(f"mantissa_divider: division error, expected 1 after normalization, got {new_mantissa[0]}")
+
+            #Drop the hidden first bit
+            new_mantissa: list[int] = new_mantissa[1:] 
+            
+            #Adjust the exponent
+            exp: list[int] = long_div_subtract(num1 = exp, num2 = [1])[1] #decrement the exponent by one due to the left shift (moving the decimal point to the right)
+
+        else:
+            new_mantissa: list[int] = new_mantissa[1:] #drop the hidden first bit
+
+
+    return exp, new_mantissa, sticky_bits
+
+
+
+def divide_floats(dividend: float | int, divisor: float | int, precision: int = 64) -> float:
+    #Argument type checks
+    if not isinstance(dividend, (float, int)) or not isinstance(divisor, (float, int)):
+        raise TypeError(f"divide_floats: the arguments num_1 and num_2 must be of type float or int, {isinstance(num_1, (float, int))} and {isinstance(num_2, (float, int))} were provided.")
+
+    if not isinstance(precision, (int)):
+        raise TypeError(f"divide_floats: the argument precision must be of type int, {isinstance(precision, (int))} was provided.")
+
+
+    #Convert the inputs to bit strings
+    num_1_bits: str = float_to_binary(num = dividend, bit_len = precision)
+    num_2_bits: str = float_to_binary(num = divisor, bit_len = precision)
+
+
+    #Convert the bit strings to lists
+    n1_bit_lst: list[int] = [int(i) for i in num_1_bits]
+    n2_bit_lst: list[int] = [int(i) for i in num_2_bits]
+
+
+    #Check if any operand is a subnormal 
+
+
+    #Define features based on precision
+    if precision == 32:
+        exp_len: int = 8
+        mant_len: int = 23
+        exp_bias: int = 127
+        intermediate_buffer_len: int = 10
+
+    elif precision == 64:
+        exp_len: int = 11
+        mant_len: int = 52
+        exp_bias: int = 1023
+        intermediate_buffer_len: int = 13
+
+    else:
+        raise ValueError(f"divide_floats: 32 or 64 was expected for precision, {precision} was provided.")
+
+    #Edge case check for division by zero which should produce a NaN
+    if n2_bit_lst.count(1) == 0:
+        final_exponent: str = "1" * exp_len #exponent must be all 1s
+        
+        final_mantissa: str = "1" + ("0" * (mant_len - 1)) #mantissa must be all 0s with a leading 1
+
+        new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+        final_sign_bit: str = str(new_sign_bit)
+
+        float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+
+        return binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+    
+
+    #Normal division where the dividend is 0, should exit with a 0
+    if n1_bit_lst.count(1) == 0:
+        final_exponent: str = "0" * exp_len #exponent must be all 0s
+        
+        final_mantissa: str = "0" * mant_len #mantissa must be all 0s
+
+        new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+        final_sign_bit: str = str(new_sign_bit)
+
+        float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+
+        return binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+
+    #Input infinity check and exit upon exponent overflow
+    if n1_bit_lst[1 : exp_len + 1].count(0) == 0 and n2_bit_lst[1 : exp_len + 1].count(0) == 0: #only 1s, no 0s
+        
+        final_exponent: str = ""
+        for bit in range(exp_len):
+            final_exponent += str(1)
+
+        final_mantissa: str = "0" * mant_len #mantissa must be all 0s
+
+        new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+        final_sign_bit: str = str(new_sign_bit)
+
+        float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+        print(float_out_bit_string)
+
+        return binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+
+    #Input NaN check and exit upon exponent overflow
+    if (n1_bit_lst[1 : exp_len + 1].count(0) == 0 and n1_bit_lst[exp_len + 1] == 1 and n1_bit_lst[exp_len + 2:].count(1) == 0) or (n2_bit_lst[1 : exp_len + 1].count(0) == 0 and n2_bit_lst[exp_len + 1] == 1 and n2_bit_lst[exp_len + 2:].count(1) == 0): #one of the operands is a NaN
+        final_exponent: str = "1" * exp_len #exponent must be all 1s
+        
+        final_mantissa: str = "1" + ("0" * (mant_len - 1)) #mantissa must be all 0s with a leading 1
+
+        new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+        final_sign_bit: str = str(new_sign_bit)
+
+        float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+
+        return binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+
+    
+    #Separate the exponent and mantissa bits
+    num_1_exp: list[int] = n1_bit_lst[1 : exp_len + 1]
+    num_2_exp: list[int] = n2_bit_lst[1 : exp_len + 1]
+
+    dividend_mantissa: list[int] = n1_bit_lst[exp_len + 1 : (exp_len + 1) + mant_len] #bit 9 -> bit 32 in a 32 bit float (bit 32 is exclusive)
+    divisor_mantissa: list[int] = n2_bit_lst[exp_len + 1 : (exp_len + 1) + mant_len]
+
+
+    #Check for subnormal numbers and normalize them if present
+    subnormal_num: bool = False
+    subnormal_dividend: bool = False
+    subnormal_divisor: bool = False
+    
+    nlz_dividend: int = 0 #number of leading 0s which is given by the mantissa
+    nlz_divisor: int = 0 #number of leading 0s which is given by the mantissa
+
+    if num_1_exp.count(1) == 0 and (dividend_mantissa.count(1) != 0):
+        subnormal_dividend: bool = True
+        subnormal_num: bool = True
+        for bit in dividend_mantissa:
+            if bit == 0:
+                nlz_dividend += 1
+            else:
+                break
+
+        nlz_dividend += 1 #add the hidden leading 0
+
+    if num_2_exp.count(1) == 0 and (divisor_mantissa.count(1) != 0):
+        subnormal_divisor: bool = True
+        subnormal_num: bool = True
+        for bit in divisor_mantissa:
+            if bit == 0:
+                nlz_divisor += 1
+            else:
+                break
+        
+        nlz_divisor += 1 #add the hidden leading 0
+
+    #Calculate the new exponent
+    biased_exponent_difference: list[int] = sub_biased_exponents(exponent_1 = num_1_exp, exponent_2 = num_2_exp, intermediate_len = intermediate_buffer_len)
+    new_exponent, mantissa_shift = add_bias(exponent_seq = biased_exponent_difference, bias = exp_bias, intermediate_len = intermediate_buffer_len, final_len = exp_len,
+                                    subnormal = subnormal_num, subnormal_dividend = subnormal_dividend, subnormal_divisor = subnormal_divisor, nlz_dividend = nlz_dividend,
+                                    nlz_divisor = nlz_divisor)
+
+    #Check if we got a subnormal quotient during exponent calculation
+    subnormal_quotient: bool = False
+    if new_exponent.count(1) == 0:
+        subnormal_quotient = True
+
+    #Calculate the new, full length mantissa quotient the potential new exponent and the remainder which will be out sticky bits
+    new_exponent, mantissa_quotient, sticky_bits = mantissa_divider(mantissa_1 = dividend_mantissa, mantissa_2 = divisor_mantissa, new_exponent = new_exponent, mantissa_length = mant_len,
+                                                    subn_dividend = subnormal_dividend, subn_divisor = subnormal_divisor, nlz_dividend = nlz_dividend, 
+                                                    nlz_divisor = nlz_divisor, subn_result = subnormal_quotient, subn_shift = mantissa_shift)
+
+    
+    #Round and trim the new mantissa_product to the proper length and handle potential rounding overflow into the new exponent
+    new_extended_mantissa: list[int] = mantissa_quotient #use the full mantissa product as an extended mantissa for rounding
+    
+    extended_mantissa_string: str = "" #convert the extended mantissa to a string for the float rounding
+    sticky_bit_string: str = "" #convert the sticky bits (remainder) to a string for the float rounding
+    exponent_string: str = "" #convert the exponent to a string for the float rounding
+
+    for bit in new_extended_mantissa: #mantissa string conversion
+        extended_mantissa_string += str(bit)
+
+    for bit in sticky_bits: #sticky bits string conversion
+        sticky_bit_string += str(bit)
+
+    for bit in new_exponent: #exponent string conversion
+        exponent_string += str(bit)
+
+    rounding_bits: str = extended_mantissa_string[mant_len :] + sticky_bit_string #prepare the extra bits for rounding
+    mantissa_string: str = extended_mantissa_string[0 : mant_len] #prepare the mantissa for rounding
+    
+
+    #Round the exponent and mantissa
+    final_exponent, final_mantissa = float_rounder(exponent = exponent_string, mantissa = mantissa_string, rounding_bits = rounding_bits)
+
+    print(final_exponent, final_mantissa)
+    
+    #Infinity check for the final exponent value and exit upon exponent overflow
+    if final_exponent.rfind("0") == -1: #only 1s, no 0s
+        final_exponent: str = ""
+        for bit in new_exponent:
+            final_exponent += str(bit)
+
+        final_mantissa: str = "0" * mant_len #mantissa must be all 0s
+
+        new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+        final_sign_bit: str = str(new_sign_bit)
+
+        float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+        
+
+        return binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+    
+
+    #Decide the sign bit using the xor operation
+    new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+    final_sign_bit: str = str(new_sign_bit)
+
+
+    #Assemble the new floating point number as a bit string
+    float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+
+
+    #Convert the new floating point bit string into a floating point number
+    float_out: float = binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+
+    return float_out

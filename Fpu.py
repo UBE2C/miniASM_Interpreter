@@ -1128,9 +1128,212 @@ class FPU_multiplier_divider:
             return output, mantissa_shift
 
 
+    def long_div_subtract(self, num1: list[int], num2: list[int]) -> tuple[int, list[int]]:
+        """
+        Takes unsigned inputs in MSB -> LSB order and adds a sign bit.
+        Returns an unsigned bit sequence in MSB -> LSB order by chopping off the sing bit.
+        Used for both operand magnitude comparison and subtraction during long division.
+        This subtraction method is only suitable for use in a long division algorithm!
+        """
+        
+        #Borrow the arguments
+        n1: list[int] = num1.copy()
+        n2: list[int] = num2.copy()
+
+        #Extend the input numbers with sign bits
+        n1.insert(0, 0)
+        n2.insert(0, 0)
+
+        #adjust the bit length
+        if len(n1) < len(n2):
+            for _ in range((len(n2) - len(n1))):
+                n1.insert(0, 0)
+        
+        elif len(n1) > len(n2):
+            for _ in range((len(n1) - len(n2))):
+                n2.insert(0, 0)
+
+        else:
+            pass
+
+        #Reverse the bit order to LSB -> MSB
+        n1.reverse()
+        n2.reverse()
+
+        n2_2c: list[int] = self.fp_twos_complement(bit_seq = n2)
+
+        #Declare variables
+        new_seq: list[int] = []
+        carry_over: int = 0
+        msb_in: int = 0
+
+        #Subtraction loop based on a full adder and two's complement
+        for bit_index in range(len(n1)):
+            new_bit: int = 0
+
+            if bit_index == ((len(n1) - 1)):
+                msb_in: int = carry_over
+
+            new_bit, carry_over = self.full_adder(input_a = n1[bit_index], input_b = n2_2c[bit_index], carry_in = carry_over)
+
+            new_seq.append(new_bit)
+
+        #Check for overflow
+        if msb_in != carry_over:
+            raise FpuError(message="long_div_subtract: overflow detected while subtracting during long division")
+        
+        #Reverse the bit order to MSB -> LSB
+        new_seq.reverse()
+
+        #Extract the sing bit
+        sign_bit: int = new_seq[0]
+
+        return sign_bit, new_seq[1:]
+
+
+    def fp_long_divider(self, dividend: list[int], divisor: list[int], bit_len: int) -> tuple[list[int], list[int]]:
+        """
+        Does a long division of the mantissa sequences based on the inputs bit lists.
+        The dividend and divisor must be ordered MSB -> LSB, and the bit_len determines the output length.
+        Returns the quotient and the remainder in an MSB -> LSB order.
+        This long divider is only suitable for use in mantissa division due to the dividend padding applied!
+        """
+
+        #Borrow the dividend 
+        num_1: list[int] = dividend.copy()
+
+        #Pad the dividend to the extended length
+        if len(num_1) < bit_len:
+            for bit in range(bit_len - len(num_1)):
+                num_1.append(0) #mantissa sequences have to be padded at the end
+
+        #Cut the divisor to the first MSB
+
+        #Declare the necessary variables
+        quotient: list[int] = [] #will serve as the new mantissa
+        remainder: list[int] = [] #will serve as the sticky bits during rounding
+
+        #Division loop
+        for bit_index, bit in enumerate(num_1):
+            #print(f"Before append: remainder = {remainder}")
+            remainder.append(bit)
+
+            #Subtraction for comparison (dividend >= divider or dividend < divider) and for division subtraction
+            sign, temp_remainder = self.long_div_subtract(num1 = remainder, num2 = divisor) 
+
+            #Decide if the remainder is divisible
+            if sign == 1:
+                quotient.append(0)
+                
+            else:
+                quotient.append(1)
+                remainder: list[int] = temp_remainder
+                
+            
+        return quotient, remainder
+
+
     def mantissa_divider(self, mantissa_1: list[int], mantissa_2: list[int], new_exponent: list[int], mantissa_length: int,
                          subn_dividend: bool, subn_divisor: bool, nlz_dividend: int, nlz_divisor: int,
-                         subn_result: bool, subn_shift: int) -> tuple[list[int], list[int]]:
+                         subn_result: bool, subn_shift: int) -> tuple[list[int], list[int], list[int]]:
+        """
+
+        """
+
+        #Borrow the mantissa and exponent sequences
+        mant_1: list[int] = mantissa_1.copy()
+        mant_2: list[int] = mantissa_2.copy()
+        exp: list[int] = new_exponent.copy()
+
+        #Check if there is a subnormal number and re-insert the hidden 0 or 1 into the mantissa sequences accordingly
+        if subn_dividend == True and subn_divisor == True:
+            mant_1.insert(0, 0) #subnormal, re-insert a 0
+            mant_2.insert(0, 0) #subnormal, re-insert a 0
+
+            #remove the leading 0s to normalize the mantissas (1st step of a left shift)
+            mant_1 = mant_1[nlz_dividend: len(mant_1)]
+            mant_2 = mant_2[nlz_divisor: len(mant_2)]
+
+            #pad them to normal length (2nd step of a left shift)
+            [mant_1.append(0) for _ in range(nlz_dividend)]
+            [mant_2.append(0) for _ in range(nlz_divisor)]
+        
+        elif subn_dividend == True and subn_divisor == False:
+            mant_1.insert(0, 0) #subnormal, re-insert a 0
+            mant_2.insert(0, 1) #normal, re-insert a 1
+
+            #remove the leading 0s to normalize the mantissas (1st step of a left shift)
+            mant_1 = mant_1[nlz_dividend : len(mant_1)]
+            
+            #pad them to normal length (2nd step of a left shift)
+            [mant_1.append(0) for _ in range(nlz_dividend)]
+
+        elif subn_dividend == False and subn_divisor == True:
+            mant_1.insert(0, 1) #normal, re-insert a 1
+            mant_2.insert(0, 0) #subnormal, re-insert a 0
+
+            #remove the leading 0s to normalize the mantissas (1st step of a left shift)
+            mant_2 = mant_2[nlz_divisor: len(mant_2)]
+
+            #pad them to normal length (2nd step of a left shift)
+            [mant_2.append(0) for _ in range(nlz_divisor)]
+
+            print(mant_2)
+
+        else:
+            mant_1.insert(0, 1) #normal, re-insert a 1
+            mant_2.insert(0, 1) #normal, re-insert a 1
+
+        #Extend the mantissa length for rounding (guard and rounding bit)
+        extended_len: int = 2 * (mantissa_length + 2)
+        print(f" mantissas before division: {mant_1}\n{mant_2}")
+
+        #Divide the mantissas
+        new_mantissa, remainder = self.fp_long_divider(dividend = mant_1, divisor = mant_2, bit_len = extended_len)
+        new_mantissa: list[int] = new_mantissa[mantissa_length :] #left shift the mantissa to discard the leading zeros coming from the long division
+        
+
+        if subn_result == True:
+            
+            #Normalize the significand if needed
+            if new_mantissa[0] == 0: #if the new mantissa starts with a 0 do a left shift to normalize it
+                #Mantissa left shift
+                new_mantissa: list[int] = new_mantissa[1:]
+                new_mantissa.append(0)
+
+                # This should ALWAYS be true for correct division
+                if new_mantissa[0] != 1:
+                    raise FpuError(f"mantissa_divider: division error, expected 1 after normalization, got {new_mantissa[0]}")
+                
+                #Adjust the exponent
+                exp: list[int] = self.long_div_subtract(num1 = exp, num2 = [1])[1] #decrement the exponent by one due to the left shift (moving the decimal point to the right)
+
+            for _ in range(subn_shift): #if the result is subnormal shift the mantissa to the right with the previously calculated positions (|Ex-Ey+bias| + 1)
+                new_mantissa.pop()
+                new_mantissa.insert(0, 0)
+
+
+        else: 
+            if new_mantissa[0] == 0: #if the new mantissa starts with a 0 do a left shift to normalize it
+                #Mantissa left shift
+                new_mantissa: list[int] = new_mantissa[1:]
+                new_mantissa.append(0)
+
+                # This should ALWAYS be true for correct division
+                if new_mantissa[0] != 1:
+                    raise FpuError(f"mantissa_divider: division error, expected 1 after normalization, got {new_mantissa[0]}")
+
+                #Drop the hidden first bit
+                new_mantissa: list[int] = new_mantissa[1:] 
+                
+                #Adjust the exponent
+                exp: list[int] = self.long_div_subtract(num1 = exp, num2 = [1])[1] #decrement the exponent by one due to the left shift (moving the decimal point to the right)
+
+            else:
+                new_mantissa: list[int] = new_mantissa[1:] #drop the hidden first bit
+
+
+        return exp, new_mantissa, remainder
 
 
     #External method
@@ -1272,7 +1475,7 @@ class FPU_multiplier_divider:
         if n1_bit_lst[1 : exp_len + 1].count(0) == 0 or n2_bit_lst[1 : exp_len + 1].count(0) == 0: #only 1s, no 0s
             final_exponent: str = ""
             for bit in range(exp_len):
-                final_exponent += str(bit)
+                final_exponent += str(1)
 
             final_mantissa: str = "0" * mant_len #mantissa must be all 0s
 
@@ -1281,6 +1484,19 @@ class FPU_multiplier_divider:
 
             float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
             
+
+            return self.binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+
+        #Input NaN check and exit upon exponent overflow
+        if (n1_bit_lst[1 : exp_len + 1].count(0) == 0 and n1_bit_lst[exp_len + 1] == 1 and n1_bit_lst[exp_len + 2:].count(1) == 0) or (n2_bit_lst[1 : exp_len + 1].count(0) == 0 and n2_bit_lst[exp_len + 1] == 1 and n2_bit_lst[exp_len + 2:].count(1) == 0): #one of the operands is a NaN
+            final_exponent: str = "1" * exp_len #exponent must be all 1s
+            
+            final_mantissa: str = "1" + ("0" * (mant_len - 1)) #mantissa must be all 0s with a leading 1
+
+            new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+            final_sign_bit: str = str(new_sign_bit)
+
+            float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
 
             return self.binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
         
@@ -1481,6 +1697,50 @@ class FPU_multiplier_divider:
                     break
             
             nlz_divisor += 1 #add the hidden leading 0
+
+        #Calculate the new exponent
+        biased_exponent_difference: list[int] = self.sub_biased_exponents(exponent_1 = num_1_exp, exponent_2 = num_2_exp, intermediate_len = intermediate_buffer_len)
+        new_exponent, mantissa_shift = self.add_bias(exponent_seq = biased_exponent_difference, bias = exp_bias, intermediate_len = intermediate_buffer_len, final_len = exp_len,
+                                        subnormal = subnormal_num, subnormal_dividend = subnormal_dividend, subnormal_divisor = subnormal_divisor, nlz_dividend = nlz_dividend,
+                                        nlz_divisor = nlz_divisor)
+
+        #Check if we got a subnormal quotient during exponent calculation
+        subnormal_quotient: bool = False
+        if new_exponent.count(1) == 0:
+            subnormal_quotient = True
+
+        #Calculate the new, full length mantissa quotient the potential new exponent and the remainder which will be out sticky bits
+        new_exponent, mantissa_quotient, sticky_bits = self.mantissa_divider(mantissa_1 = dividend_mantissa, mantissa_2 = divisor_mantissa, new_exponent = new_exponent, mantissa_length = mant_len,
+                                                        subn_dividend = subnormal_dividend, subn_divisor = subnormal_divisor, nlz_dividend = nlz_dividend, 
+                                                        nlz_divisor = nlz_divisor, subn_result = subnormal_quotient, subn_shift = mantissa_shift)
+
+        
+        #Round and trim the new mantissa_product to the proper length and handle potential rounding overflow into the new exponent
+        new_extended_mantissa: list[int] = mantissa_quotient #use the full mantissa product as an extended mantissa for rounding
+        
+        extended_mantissa_string: str = "" #convert the extended mantissa to a string for the float rounding
+        sticky_bit_string: str = "" #convert the sticky bits (remainder) to a string for the float rounding
+        exponent_string: str = "" #convert the exponent to a string for the float rounding
+
+        for bit in new_extended_mantissa: #mantissa string conversion
+            extended_mantissa_string += str(bit)
+
+        for bit in sticky_bits: #sticky bits string conversion
+            sticky_bit_string += str(bit)
+
+        for bit in new_exponent: #exponent string conversion
+            exponent_string += str(bit)
+
+        rounding_bits: str = extended_mantissa_string[mant_len :] + sticky_bit_string #prepare the extra bits for rounding
+        mantissa_string: str = extended_mantissa_string[0 : mant_len] #prepare the mantissa for rounding
+        
+
+        #Round the exponent and mantissa
+        final_exponent, final_mantissa = self.float_rounder(exponent = exponent_string, mantissa = mantissa_string, rounding_bits = rounding_bits)
+
+        print(final_exponent, final_mantissa)
+        return 0.0
+
 
 
 class FPU:
