@@ -4283,7 +4283,22 @@ def divide_floats(dividend: float | int, divisor: float | int, precision: int = 
     else:
         raise ValueError(f"divide_floats: 32 or 64 was expected for precision, {precision} was provided.")
 
-    #Edge case check for division by zero which should produce a NaN
+    #Edge case check for non-zero division by zero which should produce an infinity
+    if n1_bit_lst.count(1) != 0 and n2_bit_lst.count(1) == 0:
+        final_exponent: str = ""
+        for bit in range(exp_len):
+            final_exponent += str(1)
+
+        final_mantissa: str = "0" * mant_len #mantissa must be all 0s
+
+        new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+        final_sign_bit: str = str(new_sign_bit)
+
+        float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+
+        return binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+
+    #Edge case check for 0 division by zero which should produce a NaN
     if n2_bit_lst.count(1) == 0:
         final_exponent: str = "1" * exp_len #exponent must be all 1s
         
@@ -4310,25 +4325,8 @@ def divide_floats(dividend: float | int, divisor: float | int, precision: int = 
 
         return binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
 
-    #Input infinity check and exit upon exponent overflow
-    if n1_bit_lst[1 : exp_len + 1].count(0) == 0 and n2_bit_lst[1 : exp_len + 1].count(0) == 0: #only 1s, no 0s
-        
-        final_exponent: str = ""
-        for bit in range(exp_len):
-            final_exponent += str(1)
-
-        final_mantissa: str = "0" * mant_len #mantissa must be all 0s
-
-        new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
-        final_sign_bit: str = str(new_sign_bit)
-
-        float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
-        print(float_out_bit_string)
-
-        return binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
-
     #Input NaN check and exit upon exponent overflow
-    if (n1_bit_lst[1 : exp_len + 1].count(0) == 0 and n1_bit_lst[exp_len + 1] == 1 and n1_bit_lst[exp_len + 2:].count(1) == 0) or (n2_bit_lst[1 : exp_len + 1].count(0) == 0 and n2_bit_lst[exp_len + 1] == 1 and n2_bit_lst[exp_len + 2:].count(1) == 0): #one of the operands is a NaN
+    if (n1_bit_lst[1 : exp_len + 1].count(0) == 0 and n1_bit_lst[exp_len + 1:].count(1) != 0) or (n2_bit_lst[1 : exp_len + 1].count(0) == 0 and n2_bit_lst[exp_len + 1:].count(1) != 0): #one of the operands is a NaN
         final_exponent: str = "1" * exp_len #exponent must be all 1s
         
         final_mantissa: str = "1" + ("0" * (mant_len - 1)) #mantissa must be all 0s with a leading 1
@@ -4340,6 +4338,47 @@ def divide_floats(dividend: float | int, divisor: float | int, precision: int = 
 
         return binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
 
+    #Inifnity divided with non 0 and non infinity exits with an inf
+    if n1_bit_lst[1 : exp_len + 1].count(0) == 0 and (n2_bit_lst.count(1) != 0 and n2_bit_lst[1 : exp_len + 1].count(0) != 0): #only 1s, no 0s
+        final_exponent: str = ""
+        for bit in range(exp_len):
+            final_exponent += str(1)
+
+        final_mantissa: str = "0" * mant_len #mantissa must be all 0s
+
+        new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+        final_sign_bit: str = str(new_sign_bit)
+
+        float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+
+        return binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+
+    #Non infinity by infinity should produce and exit with a 0
+    if (n1_bit_lst.count(1) != 0 and n1_bit_lst[1 : exp_len + 1].count(0) != 0) and n2_bit_lst[1 : exp_len + 1].count(0) == 0: #only 1s, no 0s
+        
+        final_exponent: str = "0" * exp_len #exponent must be all 0s
+        
+        final_mantissa: str = "0" * mant_len #mantissa must be all 0s
+
+        new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+        final_sign_bit: str = str(new_sign_bit)
+
+        float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+
+        return binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+
+    #Inifnity divided with infinity exits with an NaN
+    if n1_bit_lst[1 : exp_len + 1].count(0) == 0 and n2_bit_lst[1 : exp_len + 1].count(0) == 0: #only 1s, no 0s
+        final_exponent: str = "1" * exp_len #exponent must be all 1s
+        
+        final_mantissa: str = "1" + ("0" * (mant_len - 1)) #mantissa must be all 0s with a leading 1
+
+        new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+        final_sign_bit: str = str(new_sign_bit)
+
+        float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+        
+        return binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
     
     #Separate the exponent and mantissa bits
     num_1_exp: list[int] = n1_bit_lst[1 : exp_len + 1]
@@ -4418,8 +4457,6 @@ def divide_floats(dividend: float | int, divisor: float | int, precision: int = 
 
     #Round the exponent and mantissa
     final_exponent, final_mantissa = float_rounder(exponent = exponent_string, mantissa = mantissa_string, rounding_bits = rounding_bits)
-
-    print(final_exponent, final_mantissa)
     
     #Infinity check for the final exponent value and exit upon exponent overflow
     if final_exponent.rfind("0") == -1: #only 1s, no 0s
