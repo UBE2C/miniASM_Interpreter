@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import struct
+import sys
 from typing import override
 
 from Custom_errors import RegisterError
@@ -56,11 +57,8 @@ class Register:
             return struct.pack(frm, var)
         
         elif var_type == "float" and isinstance(var, (float)):
-            if var >= (-2 ** 32) / 2 and var <= ((2 ** 32) / 2)-1: #32 bits, little-endian
-                frm: str = "<f"
-
-            elif var >= (-2 ** 64) / 2 and var <= ((2 ** 64) / 2)-1: #64 bits, little-endian
-                frm: str = "<d"
+            if var <= sys.float_info.max: #max representable 64bit float limit
+                frm: str = "<d" #64 bits, little-endian
 
             else:
                 raise RegisterError(f"numeric_to_byte: The supplied value: {var} exceeds the 64-bit limit.")
