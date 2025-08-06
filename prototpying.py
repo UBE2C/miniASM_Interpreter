@@ -4646,6 +4646,115 @@ def sub_exponents(exponent_1: list[int], exponent_2: list[int], bias: int, inter
     return output, mantissa_shift
 
 
+def fp_bytearray_to_bitlist(fp_number: bytearray | bytes, var_type: str, bit_length: int) -> list[int]:
+    """
+    Takes in a bytearray (little endian) representing a floating point number fetched from a register and turns it into a big endian bitlist for processing in the FPU
+    """
+    if not isinstance(fp_number, (bytearray, bytes)) and var_type == "float":
+        raise FpuError(f"fp_bytearray_to_bitlist: expected a variable of type float, got fp_number: {type(fp_number)} with var_type: {var_type}")
+
+    #Flip the bytearray to big endian for the FPU operations
+    fp_num: bytearray | bytes = fp_number[::-1]
+    
+    #Declare variables and convert convert the bytearray to a bitstring
+    bitstring: str = ""
+
+    for bit in fp_num:
+        bitstring += format(bit, "08b")
+    
+    #Convert the bytearray to a bitlist
+    bitlist: list[int] = [int(bit) for bit in bitstring]
+
+    return bitlist
+
+#NOTE: extended function for floats and ints (testing needed!) and rounding has to be implmented!
+def fp_bytearray_to_bitlist(number: bytearray | bytes, var_type: str, bit_length: int = 64, bias: int = 1023) -> list[int]:
+    """
+    Takes in a bytearray (little endian) representing a floating point number fetched from a register and turns it into a big endian bitlist for processing in the FPU
+    """
+    if not isinstance(number, (bytearray, bytes)) and (var_type == "float" or var_type == "int"):
+        raise FpuError(f"fp_bytearray_to_bitlist: expected a variable of type float, got fp_number: {type(fp_number)} with var_type: {var_type}")
+
+    #Flip the bytearray to big endian for the FPU operations
+    num: bytearray | bytes = number[::-1]
+    
+    #Declare variables and convert convert the bytearray to a bitstring
+    bitstring: str = ""
+
+    for bit in num:
+        bitstring += format(bit, "08b")
+    
+    #Convert the bytearray to a bitlist
+    bitlist: list[int] = [int(bit) for bit in bitstring]
+
+    if var_type == "float":
+        return bitlist
+    
+    #Define the components for int to float conversion
+    sing_bit: str = ""
+    exponent_seq: str = ""
+    mantissa: str = ""
+
+    #Extract the sign bit for the int conversion
+    sing_bit = str(bitlist[0])
+
+    #As my ints are signed, the negative ints are in two's complement form so I have to switch them back to unsigned for the conversion
+    #technically taking the absolute value
+    if sing_bit == "1":
+        #NOTE: the function takes a list in LSB -> MSB order, therefore I flip the list in the input
+        abs_bitlist: list[int] = fp_twos_complement(bitlist[::-1]) #convert negative numbers into unsigned versions (equvivalent to abs)
+        abs_bitlist = abs_bitlist[::-1] #flip back the list to MSB -> LSB order for further operations
+    
+    else:
+        abs_bitlist = bitlist.copy()
+
+    #For integers pad tem to 64 bits if they are not 64 bit ints
+    if len(abs_bitlist) < bit_length:
+        for bit in range(bit_length - len(abs_bitlist)):
+            abs_bitlist.insert(0, 0)
+
+    #Find the MSB position
+    msb_offset: int = 0 #I have to search for the set MSB form the MSB side, but I need the bit position form the LSB side hence the offset
+    for bit_index, bit in enumerate(abs_bitlist):
+        if bit ^ 1 == 0:
+            msb_offset = bit_index
+            break
+    
+    #Calculate where the decimal point should be (this will be new unbiased exponent)
+    msb_index: int = (bit_length - msb_offset) - 1 #MSB position form the LSB end of the string with 0 indexing = exponent
+
+    #Convert the ex to Ex by adding the bias and turn it into a bitstring
+    biased_exponent: int = msb_index + bias
+    exponent_seq = format(biased_exponent, "011b")
+    
+    #Extract the bits after the decimal point to get the mantissa
+    fractional_bits: list[int] = abs_bitlist[msb_offset + 1:] #the msb_index 1 is the hidden bit
+
+    #Set the mantissa length to 52 bits
+    if len(fractional_bits) < 52:
+        rounding_bits: list[int] = [0] * 5
+        
+        for i in range(52 - len(fractional_bits)):
+            fractional_bits.append(0)
+
+        for bit in fractional_bits:
+            mantissa += str(bit)
+        
+    elif len(fractional_bits) > 52:
+        rounding_bits: list[int] = fractional_bits[53:]
+
+        for bit in fractional_bits[:52]:
+            mantissa += str(bit)
+
+    #Build the new floating point number
+    int_bitstring: str = sing_bit + exponent_seq + mantissa
+
+    #Convert the bitstring into a bitlist
+    int_bitlist: list[int] = [int(bit) for bit in int_bitstring]
+
+    return int_bitlist
+
+
 def add_sub_exponents(exponent_1: list[int], exponent_2: list[int], bias: int, intermediate_len: int, final_len: int, mode: str, 
                   subnormal_dividend: bool, subnormal_divisor: bool, nlz_dividend: int, nlz_divisor: int) -> tuple[list[int], int]:
     #Transfer ownership of the exponents
@@ -4759,6 +4868,193 @@ def add_sub_exponents(exponent_1: list[int], exponent_2: list[int], bias: int, i
 
 
     return output, mantissa_shift
+
+
+
+
+
+
+
+#NOTE: this is the working split exponent calculation in the FPU which I will swap with the unified add_sub function
+#NOTE: Floating point multiplication unique internal methods start here
+def add_biased_exponents(self, exponent_1: list[int], exponent_2: list[int], intermediate_len: int) -> list[int]:
+    """
+    Add two biased IEEE 754 exponents for floating-point multiplication.
+    
+    Performs binary addition of two exponent bit sequences with overflow detection.
+    The exponents are added in their biased form (no bias removal required).
+    This is the first step in the IEEE 754 multiplication formula: 
+    new_exp = (exp1 + exp2) - bias.
+    
+    Args:
+        exponent_1: First exponent as list of bits in MSB->LSB order
+        exponent_2: Second exponent as list of bits in MSB->LSB order  
+        intermediate_len: Target bit length for intermediate calculations (includes overflow protection)
+        
+    Returns:
+        Sum of exponents as list of bits in LSB->MSB order, padded to intermediate_len
+        
+    Raises:
+        FpuError: If arithmetic overflow is detected during addition
+        
+    Notes:
+        - Input exponents are automatically zero-padded to intermediate_len
+        - Reverses inputs to LSB->MSB for easier bit-by-bit addition
+        - Uses full_adder for proper carry propagation
+        - Overflow detection compares MSB input carry with final carry
+        - Output remains in LSB->MSB order for subsequent bias subtraction
+        
+    Algorithm Flow:
+        1. Copy and reverse input exponents (MSB->LSB to LSB->MSB)
+        2. Zero-pad both exponents to intermediate_len
+        3. Perform bit-by-bit addition with carry propagation
+        4. Check for overflow by comparing MSB carry states
+    """
+
+    #Borrow the exponents
+    exp_1: list[int] = exponent_1.copy()
+    exp_2: list[int] = exponent_2.copy()
+
+    #Reverse the exponents for easier bitwise operations
+    exp_1.reverse()
+    exp_2.reverse()
+        
+    #Declare variables
+    carry_over: int = 0
+    new_seq: list[int] = []
+    msb_in: int = 0
+
+    #Pad the exponents to the intermediate bit length 
+    if len(exp_1) != intermediate_len or len(exp_2) != intermediate_len:
+        exp_1.extend([0 for _ in range(intermediate_len - len(exp_1))])
+        exp_2.extend([0 for _ in range(intermediate_len - len(exp_2))])
+
+    #Do bitwise addition with the full adder
+    for bit_index in range(intermediate_len):
+        new_bit: int = 0
+            
+        if bit_index == (intermediate_len - 1):
+            msb_in = carry_over
+
+        new_bit, carry_over = self.full_adder(input_a = exp_1[bit_index], input_b = exp_2[bit_index], carry_in = carry_over)
+
+        new_seq.append(new_bit)
+
+    #Check for overflow
+    if msb_in != carry_over:
+        raise FpuError(message="add_biased_exponents: overflow detected at the end of exponent addition")
+
+    return new_seq
+    
+
+def sub_bias(self, exponent_seq: list[int], bias: int, intermediate_len: int, final_len: int, subnormal: bool) -> tuple[list[int], int]:
+    """
+    Subtract the IEEE 754 exponent bias from a biased exponent sum with subnormal handling.
+    
+    Completes the IEEE 754 exponent calculation: final_exp = (exp1 + exp2) - bias.
+    Includes comprehensive subnormal number detection and handling:
+    - Detects when results fall below the normal range
+    - Calculates mantissa right-shift amounts for subnormal results
+    - Handles overflow detection for infinity generation
+    - Supports both normal and subnormal input number bias adjustments
+    
+    Args:
+        exponent_seq: Biased exponent sum as list of bits in LSB->MSB order
+        bias: IEEE 754 bias value (127 for 32-bit, 1023 for 64-bit)
+        intermediate_len: Bit length of input exponent sequence
+        final_len: Target bit length for final exponent output
+        subnormal: If True, uses modified bias for subnormal input handling
+        
+    Returns:
+        Tuple containing:
+        - Unbiased exponent as list of bits in MSB->LSB order, trimmed to final_len
+        - Mantissa shift amount (0 for normal, >0 for subnormal results)
+        
+    Raises:
+        FpuError: If arithmetic overflow is detected during subtraction
+        
+    Notes:
+        - For subnormal inputs: bias = 1 - (original_bias + leading_zeros)
+        - For normal inputs: bias = original_bias
+        - Subnormal detection: checks if result < (1 - bias)
+        - Subnormal output: exponent = all zeros, shift = |result| + 1
+        - Overflow detection: checks for bits beyond final_len
+        
+    Subnormal Handling Details:
+        - Detects subnormal results by comparing unbiased exponent with minimum normal
+        - Calculates mantissa right-shift using formula: |exp + bias| + 1
+        - Returns all-zero exponent pattern for subnormal results
+        - Maintains IEEE 754 compliance for gradual underflow
+        
+    Algorithm Flow:
+        1. Create appropriate bias (normal or subnormal-adjusted)
+        2. Convert bias to two's complement for subtraction
+        3. Perform bit-by-bit subtraction with overflow detection
+        4. Check for subnormal result and calculate shift if needed
+        5. Check for overflow and return infinity pattern if needed
+        6. Return final exponent and mantissa shift amount
+    """
+    
+
+    if subnormal == True: #for subnormal numbers we use the Ex + Ey (done before) - (1-[127 + nlz]) formula to get a normalized subnormal exponent
+        bias_seq: list[int] = self.int_to_bits(input_int = (1 - bias), bit_len = intermediate_len)
+        bias_2c: list[int] = bias_seq #as the generated bias is negative, it is already in two's complement form after translation into a bit seq
+        
+
+    else:
+        bias_seq: list[int] = self.int_to_bits(input_int = bias, bit_len = intermediate_len)
+        bias_2c: list[int] = self.fp_twos_complement(bit_seq = bias_seq)
+
+    carry_over: int = 0
+    new_seq: list[int] = []
+    msb_in: int = 0
+
+
+    for bit_index in range(intermediate_len):
+        new_bit: int = 0
+
+        if bit_index == (intermediate_len - 1):
+            msb_in = carry_over
+            
+        new_bit, carry_over = self.full_adder(input_a = exponent_seq[bit_index], input_b = bias_2c[bit_index], carry_in = carry_over)
+
+        new_seq.append(new_bit)
+
+    if msb_in != carry_over:
+        raise FpuError(message="sub_bias: overflow detected at the end of bias subtraction")
+    
+    #Calculate the new unbiased exponent to check if the result is a subnormal number and define the mantissa shift subnormals
+    biased_new_exponent: int = self.bit_to_int(input_bits = new_seq, signed = False) #this is the |ex+ey-bias| part of the shift calculation
+    mantissa_shift: int = 0
+    
+    #detect a subnormal result by checking if the extended new biased exponent is less than the lowest normal exponent
+    if biased_new_exponent - bias < (1-bias):
+        output: list[int] = [0 for _ in range(final_len)] #Subnormal exponent pattern: all 0s
+        output = output[::-1]
+        
+        
+        #If the result is subnormal calculate the necessary mantissa shift  using the formula |ex+ey-bias| + 1
+        mantissa_shift: int = abs(biased_new_exponent) + 1
+        #mantissa_shift = mantissa_shift
+
+        return output, mantissa_shift
+
+    #detect overflow which should produce an Inf value
+    if subnormal == False and new_seq[final_len : len(new_seq)].count(1) != 0: #there are 1s over the exponent bit limit
+        output: list[int] = [1 for _ in range(final_len)] #Inf exponent pattern: all 1s
+        output = output[::-1]
+        
+
+        return output, mantissa_shift
+    
+    else:
+        output: list[int] = new_seq[0:final_len]
+        output = output[::-1]
+
+
+        return output, mantissa_shift
+
+
 
     
         
@@ -4879,3 +5175,7 @@ def add_bias(exponent_seq: list[int], bias: int, intermediate_len: int, final_le
 
 
         return output, mantissa_shift
+    
+
+
+    
