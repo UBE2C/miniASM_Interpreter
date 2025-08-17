@@ -506,11 +506,31 @@ class Memory:
         return return_buffer, element_type
 
 
-    def load_address(self, adrs:int) -> int:
+    def load_address(self, adrs:int | list[int], return_type: str = "bytearray") -> int | bytearray:
         """Retrieves a single memory cell/variable from the memory - can be called by the RegisterSupervisor"""
-        return_buffer: int = self.vram[adrs]
+        if isinstance(adrs, (int)):
+            return_buffer: bytearray = self.vram[slice(adrs, adrs + 1)]
+        
+        elif isinstance(adrs, (list)):    
+            if not all(isinstance(_, (int)) for _ in adrs):
+                raise MemoryError(f"load_address: the address argument if lis, must contain integers, however a non-integer element was supplied.")
+            
+            if len(adrs) != 2:
+                raise MemoryError(f"load_address: the address argument if lis, must have length two, a list with {len(adrs)} was supplied.")
+            
+            return_buffer: bytearray = self.vram[slice(adrs[0], adrs[1])] 
 
-        return return_buffer
+        else:
+            raise MemoryError(f"load_address: the adrs argument must be either of type int or list, but {type(adrs)} was provided.")
+
+        if return_type == "bytearray":
+            return return_buffer
+        
+        elif return_type == "int":
+            return self.byte_to_numeric(var = return_buffer, var_type = 'int')
+
+        else:
+            raise MemoryError(f"load_address: return_type must be either bytearray or int, {type(return_type)} was provided.")
         
 
 
