@@ -4669,90 +4669,110 @@ def fp_bytearray_to_bitlist(fp_number: bytearray | bytes, var_type: str, bit_len
 
 #NOTE: extended function for floats and ints (testing needed!) and rounding has to be implmented!
 def fp_bytearray_to_bitlist(number: bytearray | bytes, var_type: str, bit_length: int = 64, bias: int = 1023) -> list[int]:
-    """
-    Takes in a bytearray (little endian) representing a floating point number fetched from a register and turns it into a big endian bitlist for processing in the FPU
-    """
-    if not isinstance(number, (bytearray, bytes)) and (var_type == "float" or var_type == "int"):
-        raise FpuError(f"fp_bytearray_to_bitlist: expected a variable of type float, got fp_number: {type(fp_number)} with var_type: {var_type}")
+        """
+        Takes in a bytearray (little endian) representing a floating point number or integer fetched from a register and turns it into an MSB -> LSB bitlist for processing in the FPU
+        """
+        if not isinstance(number, (bytearray, bytes)) and (var_type == "float" or var_type == "int"):
+            raise FpuError(f"fp_bytearray_to_bitlist: expected a variable of type float, got fp_number: {type(number)} with var_type: {var_type}")
 
-    #Flip the bytearray to big endian for the FPU operations
-    num: bytearray | bytes = number[::-1]
-    
-    #Declare variables and convert convert the bytearray to a bitstring
-    bitstring: str = ""
-
-    for bit in num:
-        bitstring += format(bit, "08b")
-    
-    #Convert the bytearray to a bitlist
-    bitlist: list[int] = [int(bit) for bit in bitstring]
-
-    if var_type == "float":
-        return bitlist
-    
-    #Define the components for int to float conversion
-    sing_bit: str = ""
-    exponent_seq: str = ""
-    mantissa: str = ""
-
-    #Extract the sign bit for the int conversion
-    sing_bit = str(bitlist[0])
-
-    #As my ints are signed, the negative ints are in two's complement form so I have to switch them back to unsigned for the conversion
-    #technically taking the absolute value
-    if sing_bit == "1":
-        #NOTE: the function takes a list in LSB -> MSB order, therefore I flip the list in the input
-        abs_bitlist: list[int] = fp_twos_complement(bitlist[::-1]) #convert negative numbers into unsigned versions (equvivalent to abs)
-        abs_bitlist = abs_bitlist[::-1] #flip back the list to MSB -> LSB order for further operations
-    
-    else:
-        abs_bitlist = bitlist.copy()
-
-    #For integers pad tem to 64 bits if they are not 64 bit ints
-    if len(abs_bitlist) < bit_length:
-        for bit in range(bit_length - len(abs_bitlist)):
-            abs_bitlist.insert(0, 0)
-
-    #Find the MSB position
-    msb_offset: int = 0 #I have to search for the set MSB form the MSB side, but I need the bit position form the LSB side hence the offset
-    for bit_index, bit in enumerate(abs_bitlist):
-        if bit ^ 1 == 0:
-            msb_offset = bit_index
-            break
-    
-    #Calculate where the decimal point should be (this will be new unbiased exponent)
-    msb_index: int = (bit_length - msb_offset) - 1 #MSB position form the LSB end of the string with 0 indexing = exponent
-
-    #Convert the ex to Ex by adding the bias and turn it into a bitstring
-    biased_exponent: int = msb_index + bias
-    exponent_seq = format(biased_exponent, "011b")
-    
-    #Extract the bits after the decimal point to get the mantissa
-    fractional_bits: list[int] = abs_bitlist[msb_offset + 1:] #the msb_index 1 is the hidden bit
-
-    #Set the mantissa length to 52 bits
-    if len(fractional_bits) < 52:
-        rounding_bits: list[int] = [0] * 5
+        #Flip the bytearray to big endian for the FPU operations
+        num: bytearray | bytes = number[::-1]
         
-        for i in range(52 - len(fractional_bits)):
-            fractional_bits.append(0)
+        #Declare variables and convert the bytearray to a bitstring
+        bitstring: str = ""
 
-        for bit in fractional_bits:
-            mantissa += str(bit)
+        for bit in num:
+            bitstring += format(bit, "08b")
         
-    elif len(fractional_bits) > 52:
-        rounding_bits: list[int] = fractional_bits[53:]
+        #Convert the bytearray to a bitlist
+        bitlist: list[int] = [int(bit) for bit in bitstring]
 
-        for bit in fractional_bits[:52]:
-            mantissa += str(bit)
+        if var_type == "float":
+            return bitlist
+        
+        #Define the components for int to float conversion
+        sing_bit: str = ""
+        exponent_seq: str = ""
+        mantissa_seq: str = ""
+        rounding_bit_seq: str = ""
 
-    #Build the new floating point number
-    int_bitstring: str = sing_bit + exponent_seq + mantissa
+        #Extract the sign bit for the int conversion
+        sing_bit = str(bitlist[0])
 
-    #Convert the bitstring into a bitlist
-    int_bitlist: list[int] = [int(bit) for bit in int_bitstring]
+        #As my ints are signed, the negative ints are in two's complement form so I have to switch them back to unsigned for the conversion
+        #technically taking the absolute value
+        if sing_bit == "1":
+            #NOTE: the function takes a list in LSB -> MSB order, therefore I flip the list in the input
+            abs_bitlist: list[int] = fp_twos_complement(bitlist[::-1]) #convert negative numbers into unsigned versions (equivalent to abs)
+            abs_bitlist = abs_bitlist[::-1] #flip back the list to MSB -> LSB order for further operations
+        
+        else:
+            abs_bitlist = bitlist.copy()
 
-    return int_bitlist
+        #For integers pad tem to 64 bits if they are not 64 bit ints
+        if len(abs_bitlist) < bit_length:
+            for bit in range(bit_length - len(abs_bitlist)):
+                abs_bitlist.insert(0, 0)
+
+        #Find the MSB position
+        msb_offset: int = 0 #I have to search for the set MSB form the MSB side, but I need the bit position form the LSB side hence the offset
+        for bit_index, bit in enumerate(abs_bitlist):
+            if bit ^ 1 == 0:
+                msb_offset = bit_index
+                break
+        
+        #Calculate where the decimal point should move for the normalization (this will be new unbiased exponent)
+        msb_index: int = (bit_length - msb_offset) - 1 #MSB position form the LSB end of the string with 0 indexing = exponent
+
+        #Convert the ex to Ex by adding the bias and turn it into a bitstring
+        biased_exponent: int = msb_index + bias
+
+        if bit_length == 32:
+            exponent_seq = format(biased_exponent, "08b")
+
+        else:
+            exponent_seq = format(biased_exponent, "011b")
+        
+        #Extract the bits after the decimal point to get the mantissa
+        fractional_bits: list[int] = abs_bitlist[msb_offset + 1:] #the msb_index 1 is the hidden bit
+
+        #Set the mantissa length
+        if bit_length == 32:
+            mantissa_len: int = 23
+
+        else:
+            mantissa_len: int = 52
+
+        #Define the rounding bits based on the mantissa length
+        if len(fractional_bits) < mantissa_len:
+            rounding_bits: list[int] = [0] * 5 #if the length is less than the given mantissa length the rounding bits are all 0s
+            for bit in rounding_bits:
+                rounding_bit_seq +=  str(bit) #convert the rounding bit list into a bit string for the float_rounder function
+            
+            for _ in range(mantissa_len - len(fractional_bits)):
+                fractional_bits.append(0)
+
+            for bit in fractional_bits:
+                mantissa_seq += str(bit)
+            
+        elif len(fractional_bits) > mantissa_len:
+            rounding_bits: list[int] = fractional_bits[mantissa_len + 1:]
+            for bit in rounding_bits:
+                rounding_bit_seq +=  str(bit) #convert the rounding bit list into a bit string for the floar_rounder function
+
+            for bit in fractional_bits[:mantissa_len]:
+                mantissa_seq += str(bit)
+
+        #Round the new mantissa and exponent based on the rounding bits
+        rounded_exp, rounded_mant = float_rounder(exponent = exponent_seq, mantissa = mantissa_seq, rounding_bits = rounding_bit_seq)
+
+        #Build the new floating point number
+        int_bitstring: str = sing_bit + rounded_exp + rounded_mant
+
+        #Convert the bitstring into a bitlist
+        int_bitlist: list[int] = [int(bit) for bit in int_bitstring]
+
+        return int_bitlist
 
 
 def add_sub_exponents(exponent_1: list[int], exponent_2: list[int], bias: int, intermediate_len: int, final_len: int, mode: str, 
@@ -4836,12 +4856,12 @@ def add_sub_exponents(exponent_1: list[int], exponent_2: list[int], bias: int, i
     else:
         raise FpuError(f"add_sub_exponents: the given mode has to be either add or sub, {mode} was given.")
 
-    #Calculate the new stored exponent using the formula (ex - ey) + bias
+    #Calculate the new stored exponent using the formula (ex - ey) + bias or (ex + ey) + bias, depending on the mode
     new_seq: list[int] = add_sub_bits(bit_list_1 = unbiased_exp_1, bit_list_2 = unbiased_exp_2)
     biased_new_seq = add_sub_bits(bit_list_1 = new_seq, bit_list_2 = bias_seq)
 
     #Calculate the new exponent to check if the result is a subnormal number and define the mantissa shift subnormals
-    biased_new_exponent: int = bit_to_int(input_bits = biased_new_seq, signed = True) #this is the |Ex-Ey+bias| part of the shift calculation
+    biased_new_exponent: int = bit_to_int(input_bits = biased_new_seq, signed = True) #this is the |Ex-Ey+bias| or |Ex+Ey+bias| part of the shift calculation
     mantissa_shift: int = 0
     
     #detect a subnormal result by checking if the extended new biased exponent is less than the lowest normal exponent
@@ -4849,7 +4869,124 @@ def add_sub_exponents(exponent_1: list[int], exponent_2: list[int], bias: int, i
         output: list[int] = [0 for _ in range(final_len)] #Subnormal exponent pattern: all 0s
         output: list[int] = output[::-1]
         
-        #If the result is subnormal calculate the necessary mantissa shift  using the formula |Ex-Ey+bias| + 1
+        #If the result is subnormal calculate the necessary mantissa shift  using the formula |Ex-Ey+bias| + 1 or |Ex+Ey+bias| + 1
+        mantissa_shift: int = abs(biased_new_exponent) + 1
+
+        return output, mantissa_shift
+
+    #detect overflow which should produce an Inf value
+    if biased_new_seq[final_len : len(biased_new_seq)].count(1) != 0: #there are 1s over the exponent bit limit
+        output: list[int] = [1 for _ in range(final_len)] #Inf exponent pattern: all 1s
+        output: list[int] = output[::-1]
+        
+
+        return output, mantissa_shift
+    
+    else:
+        output: list[int] = biased_new_seq[0:final_len]
+        output: list[int] = output[::-1]
+
+
+    return output, mantissa_shift
+
+
+
+#NOTE: slight modifications to the arguments to fit the multiplication as well
+def add_sub_exponents(exponent_1: list[int], exponent_2: list[int], bias: int, intermediate_len: int, final_len: int, mode: str, 
+                  subnormal_operand_1: bool, subnormal_operand_2: bool, nlz_operand_1: int, nlz_operand_2: int) -> tuple[list[int], int]:
+    #Transfer ownership of the exponents
+    exp_1: list[int] = exponent_1.copy()
+    exp_2: list[int] = exponent_2.copy()
+
+    print(f"original exponents: {exp_1, exp_2}")
+
+    #MSB -> LSB to LSB -> MSB conversion for easier calculations
+    exp_1.reverse()
+    exp_2.reverse()
+    
+    #Pad the exponents to the intermediate bit length 
+    if len(exp_1) != intermediate_len or len(exp_2) != intermediate_len:
+        exp_1.extend([0 for _ in range(intermediate_len - len(exp_1))])
+        exp_2.extend([0 for _ in range(intermediate_len - len(exp_2))])
+
+    print(exp_1, exp_2)
+
+    #Convert the bias and nlz_counts to a bit lists for operations (LSB -> MSB)
+    nlz_dividend_seq: list[int] = int_to_bits(input_int = nlz_operand_1, bit_len = intermediate_len)
+    nlz_divisor_seq: list[int] = int_to_bits(input_int = nlz_operand_2, bit_len = intermediate_len)
+    bias_seq: list[int] = int_to_bits(input_int = bias, bit_len = intermediate_len)
+
+    #Unbias the stored exponents for the exponent operation by removing the bias
+    if subnormal_operand_1 == True and subnormal_operand_2 == False: #unbiased subnormal exponent is 1 - (bias + nlz_count)
+        #Deal with the subnormal operand
+        exp_1 = int_to_bits(input_int = 1, bit_len = intermediate_len) #set the operand 1 for the proper bias removal
+        adjusted_bias_dividend: list[int] = add_sub_bits(bit_list_1 = bias_seq, bit_list_2 = nlz_dividend_seq) #calculate the nlz_count adjusted bias
+
+        bias_seq_dividend_2c: list[int] = fp_twos_complement(bit_seq = adjusted_bias_dividend) #transform the bias to two's complement for subtraction
+        unbiased_exp_1: list[int] = add_sub_bits(bit_list_1 = exp_1, bit_list_2 = bias_seq_dividend_2c)
+
+        #Deal with the normal operand 
+        bias_seq_2c: list[int] = fp_twos_complement(bit_seq = bias_seq) #transform the bias to two's complement for subtraction
+        unbiased_exp_2: list[int] = add_sub_bits(bit_list_1 = exp_2, bit_list_2 = bias_seq_2c)
+
+    elif subnormal_operand_1 == False and subnormal_operand_2 == True: #unbiased subnormal exponent is 1 - (bias + nlz_count)
+        #Deal with the subnormal operand
+        exp_2 = int_to_bits(input_int = 1, bit_len = intermediate_len) #set the operand 2 for the proper bias removal
+        adjusted_bias_divisor: list[int] = add_sub_bits(bit_list_1 = bias_seq, bit_list_2 = nlz_divisor_seq) #calculate the nlz_count adjusted bias
+
+        bias_seq_divisor_2c: list[int] = fp_twos_complement(bit_seq = adjusted_bias_divisor) #transform the bias to two's complement for subtraction
+        unbiased_exp_2: list[int] = add_sub_bits(bit_list_1 = exp_2, bit_list_2 = bias_seq_divisor_2c)
+
+        #Deal with the normal operand 
+        bias_seq_2c: list[int] = fp_twos_complement(bit_seq = bias_seq) #transform the bias to two's complement for subtraction
+        unbiased_exp_1: list[int] = add_sub_bits(bit_list_1 = exp_1, bit_list_2 = bias_seq_2c)
+
+    elif subnormal_operand_1 == True and subnormal_operand_2 == True:
+        #Deal with the subnormal operands
+        exp_1 = int_to_bits(input_int = 1, bit_len = intermediate_len) #set the operand 1 for the proper bias removal
+        exp_2 = int_to_bits(input_int = 1, bit_len = intermediate_len) #set the operand 2 for the proper bias removal
+        
+        adjusted_bias_dividend: list[int] = add_sub_bits(bit_list_1 = bias_seq, bit_list_2 = nlz_dividend_seq) #calculate the nlz_count adjusted bias
+        adjusted_bias_divisor: list[int] = add_sub_bits(bit_list_1 = bias_seq, bit_list_2 = nlz_divisor_seq) #calculate the nlz_count adjusted bias
+
+        bias_seq_dividend_2c: list[int] = fp_twos_complement(bit_seq = adjusted_bias_dividend) #transform the bias to two's complement for subtraction
+        unbiased_exp_1: list[int] = add_sub_bits(bit_list_1 = exp_1, bit_list_2 = bias_seq_dividend_2c)
+
+        bias_seq_divisor_2c: list[int] = fp_twos_complement(bit_seq = adjusted_bias_divisor) #transform the bias to two's complement for subtraction
+        unbiased_exp_2: list[int] = add_sub_bits(bit_list_1 = exp_2, bit_list_2 = bias_seq_divisor_2c)
+
+    else:
+        #Transform the bias to two's complement for subtraction
+        bias_seq_2c = fp_twos_complement(bit_seq = bias_seq)
+        
+        #Subtract the bias from the stored exponents (Ex - bias = ex)
+        unbiased_exp_1: list[int] = add_sub_bits(bit_list_1 = exp_1, bit_list_2 = bias_seq_2c)
+        unbiased_exp_2: list[int] = add_sub_bits(bit_list_1 = exp_2, bit_list_2 = bias_seq_2c)
+
+    #Transform unbiased exponent 2 to two's complement form for the subtraction
+    if mode == "sub":
+        unbiased_exp_2 = fp_twos_complement(bit_seq = unbiased_exp_2)
+
+    elif mode == "add":
+        pass
+
+    else:
+        raise FpuError(f"add_sub_exponents: the given mode has to be either add or sub, {mode} was given.")
+
+    #Calculate the new stored exponent using the formula (ex - ey) + bias or (ex + ey) + bias, depending on the mode
+    new_seq: list[int] = add_sub_bits(bit_list_1 = unbiased_exp_1, bit_list_2 = unbiased_exp_2)
+    biased_new_seq = add_sub_bits(bit_list_1 = new_seq, bit_list_2 = bias_seq)
+
+    #Calculate the new exponent to check if the result is a subnormal number and define the mantissa shift subnormals
+    biased_new_exponent: int = bit_to_int(input_bits = biased_new_seq, signed = True) #this is the |Ex-Ey+bias| or |Ex+Ey+bias| part of the shift calculation
+    mantissa_shift: int = 0
+    
+    #detect a subnormal result by checking if the extended new biased exponent is less than the lowest normal exponent
+    if biased_new_exponent - bias < (1-bias):
+        output: list[int] = [0 for _ in range(final_len)] #Subnormal exponent pattern: all 0s
+        output: list[int] = output[::-1]
+        
+        #If the result is subnormal calculate the necessary mantissa shift  using the formula |Ex-Ey+bias| + 1 or |Ex+Ey+bias| + 1
         mantissa_shift: int = abs(biased_new_exponent) + 1
 
         return output, mantissa_shift
