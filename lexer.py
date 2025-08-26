@@ -9,7 +9,7 @@ def lexer(instructions: list[str], instruction_set: list[str], register_names: s
         if operand.isdigit():
             return Token(type = "INT", value = operand)
                                 
-        elif operand.find(".") != -1:
+        elif operand.find(".") == 1 and operand.replace(".", "").isnumeric():
             return Token(type = "FLOAT", value = operand)
         
         elif operand in register_names:
