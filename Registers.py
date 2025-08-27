@@ -276,7 +276,7 @@ class RegisterSupervisor:
         self.register_group[dest_register].write(value = transfer_buffer, value_type = source_type)
 
 
-    def write_register(self, target_register: str, value: int | float | str | bool, value_type: str) -> None:
+    def write_register(self, target_register: str, value: int | float | str | bool | bytes | bytearray, value_type: str) -> None:
         """Invokes the write function of a managed register to write the bytes representation of a numeric/character/boolean value into a managed register"""
         self.register_group[target_register].write(value = value, value_type = value_type)
 
