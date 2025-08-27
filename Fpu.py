@@ -2057,7 +2057,7 @@ class FPU:
         destination_type: str  = "float"
         self.register_supervisor.write_register(target_register = destination, value = buffer_out, value_type = destination_type)
 
-        self.last_op = "fmult"
+        self.last_op = operation
         self.last_output = buffer_out
         self.last_output_type = destination_type
 
