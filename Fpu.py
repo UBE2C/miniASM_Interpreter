@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import struct
 from typing import override
 
 from Custom_errors import FpuError
@@ -578,7 +579,259 @@ class FPU_multiplier_divider:
 
         return twoC_seq
 
+    def fp_bytearray_to_bitlist(self, number: bytearray | bytes, var_type: str, bit_length: int = 64, bias: int = 1023) -> list[int]:
+        """
+        Takes in a bytearray (little endian) representing a floating point number or integer fetched from a register and turns it into a big endian bitlist for processing in the FPU
+        """
+        if not isinstance(number, (bytearray, bytes)) and (var_type == "float" or var_type == "int"):
+            raise FpuError(f"fp_bytearray_to_bitlist: expected a variable of type float, got fp_number: {type(number)} with var_type: {var_type}")
 
+        #Flip the bytearray to big endian for the FPU operations
+        num: bytearray | bytes = number[::-1]
+        
+        #Declare variables and convert the bytearray to a bitstring
+        bitstring: str = ""
+
+        for bit in num:
+            bitstring += format(bit, "08b")
+        
+        #Convert the bytearray to a bitlist
+        bitlist: list[int] = [int(bit) for bit in bitstring]
+
+        if var_type == "float":
+            return bitlist
+        
+        #Define the components for int to float conversion
+        sing_bit: str = ""
+        exponent_seq: str = ""
+        mantissa_seq: str = ""
+        rounding_bit_seq: str = ""
+
+        #Extract the sign bit for the int conversion
+        sing_bit = str(bitlist[0])
+
+        #As my ints are signed, the negative ints are in two's complement form so I have to switch them back to unsigned for the conversion
+        #technically taking the absolute value
+        if sing_bit == "1":
+            #NOTE: the function takes a list in LSB -> MSB order, therefore I flip the list in the input
+            abs_bitlist: list[int] = self.fp_twos_complement(bitlist[::-1]) #convert negative numbers into unsigned versions (equivalent to abs)
+            abs_bitlist = abs_bitlist[::-1] #flip back the list to MSB -> LSB order for further operations
+        
+        else:
+            abs_bitlist = bitlist.copy()
+
+        #For integers pad tem to 64 bits if they are not 64 bit ints
+        if len(abs_bitlist) < bit_length:
+            for bit in range(bit_length - len(abs_bitlist)):
+                abs_bitlist.insert(0, 0)
+
+        #Find the MSB position
+        msb_offset: int = 0 #I have to search for the set MSB form the MSB side, but I need the bit position form the LSB side hence the offset
+        for bit_index, bit in enumerate(abs_bitlist):
+            if bit ^ 1 == 0:
+                msb_offset = bit_index
+                break
+        
+        #Calculate where the decimal point should move for the normalization (this will be new unbiased exponent)
+        msb_index: int = (bit_length - msb_offset) - 1 #MSB position form the LSB end of the string with 0 indexing = exponent
+
+        #Convert the ex to Ex by adding the bias and turn it into a bitstring
+        biased_exponent: int = msb_index + bias
+
+        if bit_length == 32:
+            exponent_seq = format(biased_exponent, "08b")
+
+        else:
+            exponent_seq = format(biased_exponent, "011b")
+        
+        #Extract the bits after the decimal point to get the mantissa
+        fractional_bits: list[int] = abs_bitlist[msb_offset + 1:] #the msb_index 1 is the hidden bit
+
+        #Set the mantissa length
+        if bit_length == 32:
+            mantissa_len: int = 23
+
+        else:
+            mantissa_len: int = 52
+
+        #Define the rounding bits based on the mantissa length
+        if len(fractional_bits) < mantissa_len:
+            rounding_bits: list[int] = [0] * 5 #if the length is less than the given mantissa length the rounding bits are all 0s
+            for bit in rounding_bits:
+                rounding_bit_seq +=  str(bit) #convert the rounding bit list into a bit string for the float_rounder function
+            
+            for _ in range(mantissa_len - len(fractional_bits)):
+                fractional_bits.append(0)
+
+            for bit in fractional_bits:
+                mantissa_seq += str(bit)
+            
+        elif len(fractional_bits) > mantissa_len:
+            rounding_bits: list[int] = fractional_bits[mantissa_len + 1:]
+            for bit in rounding_bits:
+                rounding_bit_seq +=  str(bit) #convert the rounding bit list into a bit string for the floar_rounder function
+
+            for bit in fractional_bits[:mantissa_len]:
+                mantissa_seq += str(bit)
+
+        #Round the new mantissa and exponent based on the rounding bits
+        rounded_exp, rounded_mant = self.float_rounder(exponent = exponent_seq, mantissa = mantissa_seq, rounding_bits = rounding_bit_seq)
+
+        #Build the new floating point number
+        int_bitstring: str = sing_bit + rounded_exp + rounded_mant
+
+        #Convert the bitstring into a bitlist
+        int_bitlist: list[int] = [int(bit) for bit in int_bitstring]
+
+        return int_bitlist
+    
+    def add_sub_bits(self, bit_list_1: list[int], bit_list_2: list[int]) -> list[int]:
+        #Equalize the length of the bit lists by padding 
+        if len(bit_list_1) != len(bit_list_2):
+            if len(bit_list_1) < len(bit_list_2):
+                bit_list_1.extend([0 for _ in range(len(bit_list_2) - len(bit_list_1))])
+            else:
+                bit_list_2.extend([0 for _ in range(len(bit_list_1) - len(bit_list_2))])
+        
+        #Declare variables
+        bit_length: int = len(bit_list_1)
+        new_seq: list[int] = []
+        carry_over: int = 0
+        msb_in: int = 0
+        
+        #Bitwise addition/subtraction if bit_list_2 is in 2's C form
+        for bit_index in range(bit_length):
+            new_bit: int = 0
+
+            if bit_index == (bit_length - 1):
+                    msb_in: int = carry_over
+                
+            new_bit, carry_over = self.full_adder(input_a = bit_list_1[bit_index], input_b = bit_list_2[bit_index], carry_in = carry_over)
+                
+            new_seq.append(new_bit)
+
+        #Check for overflow
+        if msb_in != carry_over:
+            raise FpuError(message="add_sub_bits: overflow detected at the end of exponent subtraction")
+        
+        return new_seq
+
+    def add_sub_exponents(self, exponent_1: list[int], exponent_2: list[int], bias: int, intermediate_len: int, final_len: int, mode: str, 
+                  subnormal_operand_1: bool, subnormal_operand_2: bool, nlz_operand_1: int, nlz_operand_2: int) -> tuple[list[int], int]:
+    
+        """
+        A function to add or subtract the unbiased exponents during floating point operations multiply and divide respectively.
+        It returns a tuple with the new exponent (MSB -> LSB) and the number of leading zeros.
+        """
+        
+        #Transfer ownership of the exponents
+        exp_1: list[int] = exponent_1.copy()
+        exp_2: list[int] = exponent_2.copy()
+
+
+        #MSB -> LSB to LSB -> MSB conversion for easier calculations
+        exp_1.reverse()
+        exp_2.reverse()
+        
+        #Pad the exponents to the intermediate bit length 
+        if len(exp_1) != intermediate_len or len(exp_2) != intermediate_len:
+            exp_1.extend([0 for _ in range(intermediate_len - len(exp_1))])
+            exp_2.extend([0 for _ in range(intermediate_len - len(exp_2))])
+
+        #Convert the bias and nlz_counts to a bit lists for operations (LSB -> MSB)
+        nlz_dividend_seq: list[int] = self.int_to_bits(input_int = nlz_operand_1, bit_len = intermediate_len)
+        nlz_divisor_seq: list[int] = self.int_to_bits(input_int = nlz_operand_2, bit_len = intermediate_len)
+        bias_seq: list[int] = self.int_to_bits(input_int = bias, bit_len = intermediate_len)
+
+        #Unbias the stored exponents for the exponent operation by removing the bias
+        if subnormal_operand_1 == True and subnormal_operand_2 == False: #unbiased subnormal exponent is 1 - (bias + nlz_count)
+            #Deal with the subnormal operand
+            exp_1 = self.int_to_bits(input_int = 1, bit_len = intermediate_len) #set the operand 1 for the proper bias removal
+            adjusted_bias_dividend: list[int] = self.add_sub_bits(bit_list_1 = bias_seq, bit_list_2 = nlz_dividend_seq) #calculate the nlz_count adjusted bias
+
+            bias_seq_dividend_2c: list[int] = self.fp_twos_complement(bit_seq = adjusted_bias_dividend) #transform the bias to two's complement for subtraction
+            unbiased_exp_1: list[int] = self.add_sub_bits(bit_list_1 = exp_1, bit_list_2 = bias_seq_dividend_2c)
+
+            #Deal with the normal operand 
+            bias_seq_2c: list[int] = self.fp_twos_complement(bit_seq = bias_seq) #transform the bias to two's complement for subtraction
+            unbiased_exp_2: list[int] = self.add_sub_bits(bit_list_1 = exp_2, bit_list_2 = bias_seq_2c)
+
+        elif subnormal_operand_1 == False and subnormal_operand_2 == True: #unbiased subnormal exponent is 1 - (bias + nlz_count)
+            #Deal with the subnormal operand
+            exp_2 = self.int_to_bits(input_int = 1, bit_len = intermediate_len) #set the operand 2 for the proper bias removal
+            adjusted_bias_divisor: list[int] = self.add_sub_bits(bit_list_1 = bias_seq, bit_list_2 = nlz_divisor_seq) #calculate the nlz_count adjusted bias
+
+            bias_seq_divisor_2c: list[int] = self.fp_twos_complement(bit_seq = adjusted_bias_divisor) #transform the bias to two's complement for subtraction
+            unbiased_exp_2: list[int] = self.add_sub_bits(bit_list_1 = exp_2, bit_list_2 = bias_seq_divisor_2c)
+
+            #Deal with the normal operand 
+            bias_seq_2c: list[int] = self.fp_twos_complement(bit_seq = bias_seq) #transform the bias to two's complement for subtraction
+            unbiased_exp_1: list[int] = self.add_sub_bits(bit_list_1 = exp_1, bit_list_2 = bias_seq_2c)
+
+        elif subnormal_operand_1 == True and subnormal_operand_2 == True:
+            #Deal with the subnormal operands
+            exp_1 = self.int_to_bits(input_int = 1, bit_len = intermediate_len) #set the operand 1 for the proper bias removal
+            exp_2 = self.int_to_bits(input_int = 1, bit_len = intermediate_len) #set the operand 2 for the proper bias removal
+            
+            adjusted_bias_dividend: list[int] = self.add_sub_bits(bit_list_1 = bias_seq, bit_list_2 = nlz_dividend_seq) #calculate the nlz_count adjusted bias
+            adjusted_bias_divisor: list[int] = self.add_sub_bits(bit_list_1 = bias_seq, bit_list_2 = nlz_divisor_seq) #calculate the nlz_count adjusted bias
+
+            bias_seq_dividend_2c: list[int] = self.fp_twos_complement(bit_seq = adjusted_bias_dividend) #transform the bias to two's complement for subtraction
+            unbiased_exp_1: list[int] = self.add_sub_bits(bit_list_1 = exp_1, bit_list_2 = bias_seq_dividend_2c)
+
+            bias_seq_divisor_2c: list[int] = self.fp_twos_complement(bit_seq = adjusted_bias_divisor) #transform the bias to two's complement for subtraction
+            unbiased_exp_2: list[int] = self.add_sub_bits(bit_list_1 = exp_2, bit_list_2 = bias_seq_divisor_2c)
+
+        else:
+            #Transform the bias to two's complement for subtraction
+            bias_seq_2c = self.fp_twos_complement(bit_seq = bias_seq)
+            
+            #Subtract the bias from the stored exponents (Ex - bias = ex)
+            unbiased_exp_1: list[int] = self.add_sub_bits(bit_list_1 = exp_1, bit_list_2 = bias_seq_2c)
+            unbiased_exp_2: list[int] = self.add_sub_bits(bit_list_1 = exp_2, bit_list_2 = bias_seq_2c)
+
+        #Transform unbiased exponent 2 to two's complement form for the subtraction
+        if mode == "sub":
+            unbiased_exp_2 = self.fp_twos_complement(bit_seq = unbiased_exp_2)
+
+        elif mode == "add":
+            pass
+
+        else:
+            raise FpuError(f"add_sub_exponents: the given mode has to be either add or sub, {mode} was given.")
+
+        #Calculate the new stored exponent using the formula (ex - ey) + bias or (ex + ey) + bias, depending on the mode
+        new_seq: list[int] = self.add_sub_bits(bit_list_1 = unbiased_exp_1, bit_list_2 = unbiased_exp_2)
+        biased_new_seq = self.add_sub_bits(bit_list_1 = new_seq, bit_list_2 = bias_seq)
+
+        #Calculate the new exponent to check if the result is a subnormal number and define the mantissa shift subnormals
+        biased_new_exponent: int = self.bit_to_int(input_bits = biased_new_seq, signed = True) #this is the |Ex-Ey+bias| or |Ex+Ey+bias| part of the shift calculation
+        mantissa_shift: int = 0
+        
+        #detect a subnormal result by checking if the extended new biased exponent is less than the lowest normal exponent
+        if biased_new_exponent - bias < (1-bias):
+            output: list[int] = [0 for _ in range(final_len)] #Subnormal exponent pattern: all 0s
+            output: list[int] = output[::-1]
+            
+            #If the result is subnormal calculate the necessary mantissa shift  using the formula |Ex-Ey+bias| + 1 or |Ex+Ey+bias| + 1
+            mantissa_shift: int = abs(biased_new_exponent) + 1
+
+            return output, mantissa_shift
+
+        #detect overflow which should produce an Inf value
+        if biased_new_seq[final_len : len(biased_new_seq)].count(1) != 0: #there are 1s over the exponent bit limit
+            output: list[int] = [1 for _ in range(final_len)] #Inf exponent pattern: all 1s
+            output: list[int] = output[::-1]
+            
+
+            return output, mantissa_shift
+        
+        else:
+            output: list[int] = biased_new_seq[0:final_len]
+            output: list[int] = output[::-1]
+
+
+        return output, mantissa_shift
 
 
     #NOTE: Floating point multiplication unique internal methods start here
@@ -1215,7 +1468,6 @@ class FPU_multiplier_divider:
 
         #Division loop
         for bit_index, bit in enumerate(num_1):
-            #print(f"Before append: remainder = {remainder}")
             remainder.append(bit)
 
             #Subtraction for comparison (dividend >= divider or dividend < divider) and for division subtraction
@@ -1278,7 +1530,6 @@ class FPU_multiplier_divider:
             #pad them to normal length (2nd step of a left shift)
             [mant_2.append(0) for _ in range(nlz_divisor)]
 
-            print(mant_2)
 
         else:
             mant_1.insert(0, 1) #normal, re-insert a 1
@@ -1286,7 +1537,7 @@ class FPU_multiplier_divider:
 
         #Extend the mantissa length for rounding (guard and rounding bit)
         extended_len: int = 2 * (mantissa_length + 2)
-        print(f" mantissas before division: {mant_1}\n{mant_2}")
+
 
         #Divide the mantissas
         new_mantissa, remainder = self.fp_long_divider(dividend = mant_1, divisor = mant_2, bit_len = extended_len)
@@ -1337,7 +1588,7 @@ class FPU_multiplier_divider:
 
 
     #External method
-    def multiply_floats(self, multiplicand: float | int, multiplier: float | int, precision: int = 64) -> float:
+    def multiply_floats(self, multiplicand: bytearray | bytes, multiplier: bytearray | bytes, multiplicand_type: str, multiplier_type: str, precision: int = 64) -> float:
         """
         Multiply two floating-point numbers using IEEE 754 compliant binary arithmetic with comprehensive subnormal support.
         
@@ -1409,24 +1660,20 @@ class FPU_multiplier_divider:
         """
 
         #Argument type checks
-        if not isinstance(multiplicand, (float, int)) or not isinstance(multiplier, (float, int)):
-            raise TypeError(f"float_multiplier: the arguments num_1 and num_2 must be of type float or int, {isinstance(num_1, (float, int))} and {isinstance(num_2, (float, int))} were provided.")
+        if not (multiplicand_type == "float" or multiplicand_type == "int") or not (multiplier_type == "float" or multiplier_type == "int"):
+            raise TypeError(f"divide_floats: the arguments dividend and divisor must be of type float or int, {multiplicand_type} and {multiplier_type} were provided.")
 
         if not isinstance(precision, (int)):
-            raise TypeError(f"float_multiplier: the argument precision must be of type int, {isinstance(precision, (int))} was provided.")
+            raise TypeError(f"divide_floats: the argument precision must be of type int, {isinstance(precision, (int))} was provided.")
 
 
-        #Convert the inputs to bit strings
-        num_1_bits: str = self.float_to_binary(num = multiplicand, bit_len = precision)
-        num_2_bits: str = self.float_to_binary(num = multiplier, bit_len = precision)
-
-
-        #Convert the bit strings to lists
-        n1_bit_lst: list[int] = [int(i) for i in num_1_bits]
-        n2_bit_lst: list[int] = [int(i) for i in num_2_bits]
+        #Convert the input bytearrays to bit lists (NOTE: they are directly read from the registers)
+        n1_bit_lst: list[int] = self.fp_bytearray_to_bitlist(number = multiplicand, var_type = multiplicand_type, bit_length = 64, bias = 1023)
+        n2_bit_lst: list[int] = self.fp_bytearray_to_bitlist(number = multiplier, var_type = multiplier_type, bit_length = 64, bias = 1023)
 
 
         #Define features based on precision
+        #NOTE: 32 bit will not be supported for the full version, but I will leave it in for the ease of testing
         if precision == 32:
             exp_len: int = 8
             mant_len: int = 23
@@ -1510,7 +1757,6 @@ class FPU_multiplier_divider:
 
 
         #Check for subnormal numbers and normalize them if present
-        subnormal_num: bool = False
         subnormal_multiplicand: bool = False
         subnormal_multiplier: bool = False
         
@@ -1519,7 +1765,6 @@ class FPU_multiplier_divider:
 
         if num_1_exp.count(1) == 0 and (multiplicand_mantissa.count(1) != 0):
             subnormal_multiplicand: bool = True
-            subnormal_num: bool = True
             for bit in multiplicand_mantissa:
                 if bit == 0:
                     nlz_multiplicand += 1
@@ -1530,7 +1775,6 @@ class FPU_multiplier_divider:
 
         if num_2_exp.count(1) == 0 and (multiplier_mantissa.count(1) != 0):
             subnormal_multiplier: bool = True
-            subnormal_num: bool = True
             for bit in multiplier_mantissa:
                 if bit == 0:
                     nlz_multiplier += 1
@@ -1541,22 +1785,9 @@ class FPU_multiplier_divider:
         
         
         #Calculate the new exponent
-        #NOTE: by subtracting one bias I do not need to re-add the bias at the end of the operation to get the proper exponent bit string
-        exponent_sum: list[int] = self.add_biased_exponents(exponent_1 = num_1_exp, exponent_2 = num_2_exp, intermediate_len = intermediate_buffer_len)
-        #NOTE: for subnormal numbers the exponent bias will be 1 - (bias (-126 or -1022) + number of leading zeros) which should not effect normal number calculations as /
-        #  1-bias is on a different if branch while nlz will be 0 for a normal number
-        if subnormal_multiplicand == True and subnormal_multiplier == True:
-            new_exponent, mantissa_shift = self.sub_bias(exponent_seq = exponent_sum, bias = (exp_bias + nlz_multiplicand + nlz_multiplier), intermediate_len = intermediate_buffer_len, final_len = exp_len, subnormal = subnormal_num)
-        
-        elif subnormal_multiplicand == True and subnormal_multiplier == False:
-            new_exponent, mantissa_shift = self.sub_bias(exponent_seq = exponent_sum, bias = (exp_bias + nlz_multiplicand), intermediate_len = intermediate_buffer_len, final_len = exp_len, subnormal = subnormal_num)
-            
-        elif subnormal_multiplicand == False and subnormal_multiplier == True:
-            new_exponent, mantissa_shift = self.sub_bias(exponent_seq = exponent_sum, bias = (exp_bias + nlz_multiplier), intermediate_len = intermediate_buffer_len, final_len = exp_len, subnormal = subnormal_num)
-
-        else:
-            new_exponent, mantissa_shift = self.sub_bias(exponent_seq = exponent_sum, bias = exp_bias, intermediate_len = intermediate_buffer_len, final_len = exp_len, subnormal = subnormal_num)
-
+        new_exponent, mantissa_shift = self.add_sub_exponents(exponent_1 = num_1_exp, exponent_2 = num_2_exp, bias = exp_bias, intermediate_len = intermediate_buffer_len, final_len = exp_len,
+                                        mode = "add", subnormal_operand_1 = subnormal_multiplicand, subnormal_operand_2 = subnormal_multiplier, nlz_operand_1 = nlz_multiplicand,
+                                        nlz_operand_2 = nlz_multiplier)
         
         #Check if we got a subnormal product during exponent calculation
         subnormal_product: bool = False
@@ -1622,29 +1853,22 @@ class FPU_multiplier_divider:
         return float_out
     
 
-    def divide_floats(self, dividend: float | int, deviser: float | int, precision: int = 64) -> float:
+    def divide_floats(self, dividend: bytearray | bytes, divisor: bytearray | bytes, dividend_type: str, divisor_type: str, precision: int = 64) -> float:
         #Argument type checks
-        if not isinstance(multiplicand, (float, int)) or not isinstance(multiplier, (float, int)):
-            raise TypeError(f"float_multiplier: the arguments num_1 and num_2 must be of type float or int, {isinstance(num_1, (float, int))} and {isinstance(num_2, (float, int))} were provided.")
+        if not (dividend_type == "float" or dividend_type == "int") or not (divisor_type == "float" or divisor_type == "int"):
+            raise TypeError(f"divide_floats: the arguments dividend and divisor must be of type float or int, {dividend_type} and {divisor_type} were provided.")
 
         if not isinstance(precision, (int)):
-            raise TypeError(f"float_multiplier: the argument precision must be of type int, {isinstance(precision, (int))} was provided.")
+            raise TypeError(f"divide_floats: the argument precision must be of type int, {isinstance(precision, (int))} was provided.")
 
 
-        #Convert the inputs to bit strings
-        num_1_bits: str = self.float_to_binary(num = multiplicand, bit_len = precision)
-        num_2_bits: str = self.float_to_binary(num = multiplier, bit_len = precision)
-
-
-        #Convert the bit strings to lists
-        n1_bit_lst: list[int] = [int(i) for i in num_1_bits]
-        n2_bit_lst: list[int] = [int(i) for i in num_2_bits]
-
-
-        #Check if any operand is a subnormal 
+        #Convert the input bytearrays to bit lists (NOTE: they are directly read from the registers)
+        n1_bit_lst: list[int] = self.fp_bytearray_to_bitlist(number = dividend, var_type = dividend_type, bit_length = 64, bias = 1023)
+        n2_bit_lst: list[int] = self.fp_bytearray_to_bitlist(number = divisor, var_type = divisor_type, bit_length = 64, bias = 1023)
 
 
         #Define features based on precision
+        #NOTE: 32 bit will not be supported for the full version, but I will leave it in for the ease of testing
         if precision == 32:
             exp_len: int = 8
             mant_len: int = 23
@@ -1658,8 +1882,106 @@ class FPU_multiplier_divider:
             intermediate_buffer_len: int = 13
 
         else:
-            raise ValueError(f"divide_floats: 32 or 64 was expected for precision, {precision} was provided.")
+            raise ValueError(f"divide_floats: 64 was expected for precision, {precision} was provided.")
         
+        #Edge case check for non-zero division by zero which should produce an infinity
+        if n1_bit_lst.count(1) != 0 and n2_bit_lst.count(1) == 0:
+            final_exponent: str = ""
+            for bit in range(exp_len):
+                final_exponent += str(1)
+
+            final_mantissa: str = "0" * mant_len #mantissa must be all 0s
+
+            new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+            final_sign_bit: str = str(new_sign_bit)
+
+            float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+
+            return self.binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+
+        #Edge case check for 0 division by zero which should produce a NaN
+        if n2_bit_lst.count(1) == 0:
+            final_exponent: str = "1" * exp_len #exponent must be all 1s
+            
+            final_mantissa: str = "1" + ("0" * (mant_len - 1)) #mantissa must be all 0s with a leading 1
+
+            new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+            final_sign_bit: str = str(new_sign_bit)
+
+            float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+
+            return self.binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+        
+
+        #Normal division where the dividend is 0, should exit with a 0
+        if n1_bit_lst.count(1) == 0:
+            final_exponent: str = "0" * exp_len #exponent must be all 0s
+            
+            final_mantissa: str = "0" * mant_len #mantissa must be all 0s
+
+            new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+            final_sign_bit: str = str(new_sign_bit)
+
+            float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+
+            return self.binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+
+        #Input NaN check and exit upon exponent overflow
+        if (n1_bit_lst[1 : exp_len + 1].count(0) == 0 and n1_bit_lst[exp_len + 1:].count(1) != 0) or (n2_bit_lst[1 : exp_len + 1].count(0) == 0 and n2_bit_lst[exp_len + 1:].count(1) != 0): #one of the operands is a NaN
+            final_exponent: str = "1" * exp_len #exponent must be all 1s
+            
+            final_mantissa: str = "1" + ("0" * (mant_len - 1)) #mantissa must be all 0s with a leading 1
+
+            new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+            final_sign_bit: str = str(new_sign_bit)
+
+            float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+
+            return self.binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+
+        #Inifnity divided with non 0 and non infinity exits with an inf
+        if n1_bit_lst[1 : exp_len + 1].count(0) == 0 and (n2_bit_lst.count(1) != 0 and n2_bit_lst[1 : exp_len + 1].count(0) != 0): #only 1s, no 0s
+            final_exponent: str = ""
+            for bit in range(exp_len):
+                final_exponent += str(1)
+
+            final_mantissa: str = "0" * mant_len #mantissa must be all 0s
+
+            new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+            final_sign_bit: str = str(new_sign_bit)
+
+            float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+
+            return self.binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+
+        #Non infinity by infinity should produce and exit with a 0
+        if (n1_bit_lst.count(1) != 0 and n1_bit_lst[1 : exp_len + 1].count(0) != 0) and n2_bit_lst[1 : exp_len + 1].count(0) == 0: #only 1s, no 0s
+            
+            final_exponent: str = "0" * exp_len #exponent must be all 0s
+            
+            final_mantissa: str = "0" * mant_len #mantissa must be all 0s
+
+            new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+            final_sign_bit: str = str(new_sign_bit)
+
+            float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+
+            return self.binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+
+        #Inifnity divided with infinity exits with an NaN
+        if n1_bit_lst[1 : exp_len + 1].count(0) == 0 and n2_bit_lst[1 : exp_len + 1].count(0) == 0: #only 1s, no 0s
+            final_exponent: str = "1" * exp_len #exponent must be all 1s
+            
+            final_mantissa: str = "1" + ("0" * (mant_len - 1)) #mantissa must be all 0s with a leading 1
+
+            new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+            final_sign_bit: str = str(new_sign_bit)
+
+            float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+            
+            return self.binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+
+
         #Separate the exponent and mantissa bits
         num_1_exp: list[int] = n1_bit_lst[1 : exp_len + 1]
         num_2_exp: list[int] = n2_bit_lst[1 : exp_len + 1]
@@ -1669,7 +1991,6 @@ class FPU_multiplier_divider:
 
 
         #Check for subnormal numbers and normalize them if present
-        subnormal_num: bool = False
         subnormal_dividend: bool = False
         subnormal_divisor: bool = False
         
@@ -1678,7 +1999,6 @@ class FPU_multiplier_divider:
 
         if num_1_exp.count(1) == 0 and (dividend_mantissa.count(1) != 0):
             subnormal_dividend: bool = True
-            subnormal_num: bool = True
             for bit in dividend_mantissa:
                 if bit == 0:
                     nlz_dividend += 1
@@ -1689,7 +2009,6 @@ class FPU_multiplier_divider:
 
         if num_2_exp.count(1) == 0 and (divisor_mantissa.count(1) != 0):
             subnormal_divisor: bool = True
-            subnormal_num: bool = True
             for bit in divisor_mantissa:
                 if bit == 0:
                     nlz_divisor += 1
@@ -1699,10 +2018,9 @@ class FPU_multiplier_divider:
             nlz_divisor += 1 #add the hidden leading 0
 
         #Calculate the new exponent
-        biased_exponent_difference: list[int] = self.sub_biased_exponents(exponent_1 = num_1_exp, exponent_2 = num_2_exp, intermediate_len = intermediate_buffer_len)
-        new_exponent, mantissa_shift = self.add_bias(exponent_seq = biased_exponent_difference, bias = exp_bias, intermediate_len = intermediate_buffer_len, final_len = exp_len,
-                                        subnormal = subnormal_num, subnormal_dividend = subnormal_dividend, subnormal_divisor = subnormal_divisor, nlz_dividend = nlz_dividend,
-                                        nlz_divisor = nlz_divisor)
+        new_exponent, mantissa_shift = self.add_sub_exponents(exponent_1 = num_1_exp, exponent_2 = num_2_exp, bias = exp_bias, intermediate_len = intermediate_buffer_len, final_len = exp_len,
+                                        mode = "sub", subnormal_operand_1 = subnormal_dividend, subnormal_operand_2 = subnormal_divisor, nlz_operand_1 = nlz_dividend,
+                                        nlz_operand_2 = nlz_divisor)
 
         #Check if we got a subnormal quotient during exponent calculation
         subnormal_quotient: bool = False
@@ -1738,8 +2056,461 @@ class FPU_multiplier_divider:
         #Round the exponent and mantissa
         final_exponent, final_mantissa = self.float_rounder(exponent = exponent_string, mantissa = mantissa_string, rounding_bits = rounding_bits)
 
-        print(final_exponent, final_mantissa)
-        return 0.0
+
+        #Infinity check for the final exponent value and exit upon exponent overflow
+        if final_exponent.rfind("0") == -1: #only 1s, no 0s
+            final_exponent: str = ""
+            for bit in new_exponent:
+                final_exponent += str(bit)
+
+            final_mantissa: str = "0" * mant_len #mantissa must be all 0s
+
+            new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+            final_sign_bit: str = str(new_sign_bit)
+
+            float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+            
+
+            return self.binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+        
+
+        #Decide the sign bit using the xor operation
+        new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+        final_sign_bit: str = str(new_sign_bit)
+
+
+        #Assemble the new floating point number as a bit string
+        float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+
+
+        #Convert the new floating point bit string into a floating point number
+        float_out: float = self.binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+
+        return float_out
+    
+    def mul_div_floats(self, operation: str, first_opernad: bytearray | bytes, second_operand: bytearray | bytes, first_operand_type: str, second_operand_type: str, precision: int = 64) -> float:
+        """
+        Multiply or divide two floating-point numbers using IEEE 754 compliant binary arithmetic with comprehensive subnormal support.
+        
+        Implements complete IEEE 754 floating-point multiplication and division including:
+        - Full subnormal number detection, normalization, and result handling
+        - Exponent addition (multiplication) or subtraction (division) with precision-specific bias handling
+        - Mantissa multiplication or division with hidden bit management and overflow detection
+        - Gradual underflow implementation for subnormal results
+        - Proper rounding with guard/round/sticky bits
+        - Special value handling (zero, infinity, NaN)
+        - Sign bit calculation (XOR of input signs)
+        - Support for both single (32-bit) and double (64-bit) precision
+        
+        The operations follow IEEE 754 formulas:
+        Multiplication: Result = (±1) × (normalized_mant1 × normalized_mant2) × 2^(exp1 + exp2 - bias)
+        Division: Result = (±1) × (normalized_mant1 ÷ normalized_mant2) × 2^(exp1 - exp2 + bias)
+        
+        Args:
+            operation: Operation type ("mul" for multiplication, "div" for division)
+            first_operand: First number as bytearray/bytes (multiplicand for mul, dividend for div)
+            second_operand: Second number as bytearray/bytes (multiplier for mul, divisor for div)
+            first_operand_type: Type of first operand ("float" or "int")
+            second_operand_type: Type of second operand ("float" or "int")
+            precision: Bit precision (32 for single, 64 for double precision)
+            
+        Returns:
+            Result as IEEE 754 compliant floating-point number
+            
+        Raises:
+            TypeError: If operand types are not float/int or precision is not int
+            ValueError: If precision is not 32 or 64
+            FpuError: If operation is not "mul" or "div"
+            AluError: If arithmetic overflow occurs during computation
+            BufferError: If internal buffer operations fail
+            
+        Special Cases Handled:
+            Multiplication:
+                - Zero multiplication: Returns correctly signed zero
+                - Infinity multiplication: Returns correctly signed infinity
+                - Zero × Infinity: Returns NaN (Not a Number)
+                - NaN operands: Propagates NaN result
+                
+            Division:
+                - Division by zero (non-zero ÷ 0): Returns correctly signed infinity
+                - Indeterminate division (0 ÷ 0): Returns NaN
+                - Zero dividend (0 ÷ non-zero): Returns correctly signed zero
+                - Infinity ÷ non-zero non-infinity: Returns correctly signed infinity
+                - Non-zero non-infinity ÷ infinity: Returns correctly signed zero
+                - Infinity ÷ infinity: Returns NaN
+                - NaN operands: Propagates NaN result
+                
+            Common:
+                - Subnormal inputs: Proper normalization and bias adjustment
+                - Subnormal results: Gradual underflow with mantissa shifting
+                - Exponent overflow: Returns correctly signed infinity
+                
+        Subnormal Number Support:
+            - Input Detection: Identifies subnormal operands (exp=0, mantissa≠0)
+            - Normalization: Counts leading zeros and adjusts bias accordingly
+            - Result Handling: Implements gradual underflow for subnormal products/quotients
+            - Mantissa Shifting: Applies appropriate shifts for subnormal results
+            - Precision Preservation: Maintains maximum possible precision during transitions
+            
+        Precision Specifications:
+            32-bit: 8-bit exponent, 23-bit mantissa, bias=127 NOTE: this option is only for testing purposes
+            64-bit: 11-bit exponent, 52-bit mantissa, bias=1023
+            
+        Algorithm Flow:
+            1. Input validation and type checking
+            2. Convert inputs to binary IEEE 754 representation
+            3. Handle special cases (zero, infinity, NaN)
+            4. Detect and process subnormal inputs
+            5. Calculate new exponent: (exp1 ± exp2) ± bias (depending on operation)
+            6. Perform mantissa multiplication or division with normalization
+            7. Apply subnormal result handling if needed
+            8. Round result using extended precision with guard/round/sticky bits
+            9. Assemble final IEEE 754 bit pattern
+            10. Convert back to native float format
+            
+        Notes:
+            - Uses extended precision for intermediate calculations to prevent precision loss
+            - Implements proper IEEE 754 rounding for final result
+            - Maintains bit-level accuracy throughout computation
+            - Handles all edge cases according to IEEE 754 standard
+            - Subnormal handling ensures gradual underflow behavior
+            - Comprehensive overflow detection prevents incorrect results
+            - Division uses remainder bits as sticky bits for proper rounding
+        """
+
+        #Argument type checks
+        if not (first_operand_type == "float" or first_operand_type == "int") or not (second_operand_type == "float" or second_operand_type == "int"):
+            raise TypeError(f"multiply_divide_floats: the arguments dividend and divisor must be of type float or int, {first_operand_type} and {second_operand_type} were provided.")
+
+        if not isinstance(precision, (int)):
+            raise TypeError(f"multiply_divide_floats: the argument precision must be of type int, {isinstance(precision, (int))} was provided.")
+
+        if operation != "mul" and operation != "div":
+            raise FpuError(f"multiply_divide_floats: operation is expected to be 'mul' or 'div', {operation} was provided.")
+
+        #Convert the input bytearrays to bit lists (NOTE: they are directly read from the registers)
+        n1_bit_lst: list[int] = self.fp_bytearray_to_bitlist(number = first_opernad, var_type = first_operand_type, bit_length = 64, bias = 1023)
+        n2_bit_lst: list[int] = self.fp_bytearray_to_bitlist(number = second_operand, var_type = second_operand_type, bit_length = 64, bias = 1023)
+
+
+        #Define features based on precision
+        #NOTE: 32 bit will not be supported for the full version, but I will leave it in for the ease of testing
+        if precision == 32:
+            exp_len: int = 8
+            mant_len: int = 23
+            exp_bias: int = 127
+            intermediate_buffer_len: int = 10
+
+        elif precision == 64:
+            exp_len: int = 11
+            mant_len: int = 52
+            exp_bias: int = 1023
+            intermediate_buffer_len: int = 13
+
+        else:
+            raise ValueError(f"float_multiplier: 32 or 64 was expected for precision, {precision} was provided.")
+        
+        #Edge case handling 
+        if operation == "mul": #for multiplication
+            #Weird edge case check for 0 * +/- Inf which should produce a NaN
+            if (n1_bit_lst[1:].count(1) == 0 or n2_bit_lst[1:].count(1) == 0) and ((n1_bit_lst[1 : exp_len + 1].count(0) == 0 and n1_bit_lst[exp_len + 1 : exp_len + 1 + mant_len].count(1) == 0)
+                                                                        or (n2_bit_lst[1 : exp_len + 1].count(0) == 0 and n2_bit_lst[exp_len + 1 : exp_len + 1 + mant_len].count(1) == 0)):
+                final_exponent: str = "1" * exp_len #exponent must be all 1s
+                
+                final_mantissa: str = "1" + ("0" * (mant_len - 1)) #mantissa must be all 0s with a leading 1
+
+                new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+                final_sign_bit: str = str(new_sign_bit)
+
+                float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+
+                return self.binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+            
+
+            #Normal zero multiplication check and exit upon 0 multiplier or multiplicand
+            if n1_bit_lst[1:].count(1) == 0 or n2_bit_lst[1:].count(1) == 0:
+                final_exponent: str = "0" * exp_len #exponent must be all 0s
+                
+                final_mantissa: str = "0" * mant_len #mantissa must be all 0s
+
+                new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+                final_sign_bit: str = str(new_sign_bit)
+
+                float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+
+                return self.binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+
+            #Input infinity check and exit upon exponent overflow
+            if n1_bit_lst[1 : exp_len + 1].count(0) == 0 or n2_bit_lst[1 : exp_len + 1].count(0) == 0: #only 1s, no 0s
+                final_exponent: str = ""
+                for bit in range(exp_len):
+                    final_exponent += str(1)
+
+                final_mantissa: str = "0" * mant_len #mantissa must be all 0s
+
+                new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+                final_sign_bit: str = str(new_sign_bit)
+
+                float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+                
+
+                return self.binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+
+            #Input NaN check and exit upon exponent overflow
+            if (n1_bit_lst[1 : exp_len + 1].count(0) == 0 and n1_bit_lst[exp_len + 1:].count(1) != 0) or (n2_bit_lst[1 : exp_len + 1].count(0) == 0 and n2_bit_lst[exp_len + 1:].count(1) != 0): #one of the operands is a NaN
+                final_exponent: str = "1" * exp_len #exponent must be all 1s
+                
+                final_mantissa: str = "1" + ("0" * (mant_len - 1)) #mantissa must be all 0s with a leading 1
+
+                new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+                final_sign_bit: str = str(new_sign_bit)
+
+                float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+
+                return self.binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+            
+        else: #for division
+            #Input NaN check and exit upon exponent overflow
+            if (n1_bit_lst[1 : exp_len + 1].count(0) == 0 and n1_bit_lst[exp_len + 1:].count(1) != 0) or (n2_bit_lst[1 : exp_len + 1].count(0) == 0 and n2_bit_lst[exp_len + 1:].count(1) != 0): #one of the operands is a NaN
+                final_exponent: str = "1" * exp_len #exponent must be all 1s
+                
+                final_mantissa: str = "1" + ("0" * (mant_len - 1)) #mantissa must be all 0s with a leading 1
+
+                new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+                final_sign_bit: str = str(new_sign_bit)
+
+                float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+
+                return self.binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+            
+
+            #Edge case check for 0 division by zero which should produce a NaN
+            if n1_bit_lst[1:].count(1) == 0 and n2_bit_lst[1:].count(1) == 0:
+                final_exponent: str = "1" * exp_len #exponent must be all 1s
+                
+                final_mantissa: str = "1" + ("0" * (mant_len - 1)) #mantissa must be all 0s with a leading 1
+
+                new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+                final_sign_bit: str = str(new_sign_bit)
+
+                float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+
+                return self.binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+            
+
+            #Edge case check for non-zero division by zero which should produce an infinity
+            if n1_bit_lst[1:].count(1) != 0 and n2_bit_lst[1:].count(1) == 0:
+                final_exponent: str = ""
+                for bit in range(exp_len):
+                    final_exponent += str(1)
+
+                final_mantissa: str = "0" * mant_len #mantissa must be all 0s
+
+                new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+                final_sign_bit: str = str(new_sign_bit)
+
+                float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+
+                return self.binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+
+            
+            #Normal division where the dividend is 0, should exit with a 0
+            if n1_bit_lst[1:].count(1) == 0:
+                final_exponent: str = "0" * exp_len #exponent must be all 0s
+                
+                final_mantissa: str = "0" * mant_len #mantissa must be all 0s
+
+                new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+                final_sign_bit: str = str(new_sign_bit)
+
+                float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+
+                return self.binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+            
+
+            #Inifnity divided with non 0 and non infinity exits with an inf
+            if (n1_bit_lst[1 : exp_len + 1].count(0) == 0 and n1_bit_lst[exp_len + 1:].count(1) == 0) and (n2_bit_lst.count(1) != 0 and n2_bit_lst[1 : exp_len + 1].count(0) != 0): #only 1s, no 0s
+                final_exponent: str = ""
+                for bit in range(exp_len):
+                    final_exponent += str(1)
+
+                final_mantissa: str = "0" * mant_len #mantissa must be all 0s
+
+                new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+                final_sign_bit: str = str(new_sign_bit)
+
+                float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+
+                return self.binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+
+            #Non infinity by infinity should produce and exit with a 0
+            if (n1_bit_lst.count(1) != 0 and n1_bit_lst[1 : exp_len + 1].count(0) != 0) and (n2_bit_lst[1 : exp_len + 1].count(0) == 0 and n2_bit_lst[exp_len + 1:].count(1) == 0): #only 1s, no 0s
+                
+                final_exponent: str = "0" * exp_len #exponent must be all 0s
+                
+                final_mantissa: str = "0" * mant_len #mantissa must be all 0s
+
+                new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+                final_sign_bit: str = str(new_sign_bit)
+
+                float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+
+                return self.binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+
+            #Inifnity divided with infinity exits with an NaN
+            if (n1_bit_lst[1 : exp_len + 1].count(0) == 0 and n1_bit_lst[exp_len + 1:].count(1) == 0) and (n2_bit_lst[1 : exp_len + 1].count(0) == 0 and n2_bit_lst[exp_len + 1:].count(1) == 0): #only 1s, no 0s
+                final_exponent: str = "1" * exp_len #exponent must be all 1s
+                
+                final_mantissa: str = "1" + ("0" * (mant_len - 1)) #mantissa must be all 0s with a leading 1
+
+                new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+                final_sign_bit: str = str(new_sign_bit)
+
+                float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+                
+                return self.binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+            
+
+        #Separate the exponent and mantissa bits
+        num_1_exp: list[int] = n1_bit_lst[1 : exp_len + 1]
+        num_2_exp: list[int] = n2_bit_lst[1 : exp_len + 1]
+
+        op1_mantissa: list[int] = n1_bit_lst[exp_len + 1 : (exp_len + 1) + mant_len] #bit 9 -> bit 32 in a 32 bit float (bit 32 is exclusive)
+        op2_mantissa: list[int] = n2_bit_lst[exp_len + 1 : (exp_len + 1) + mant_len]
+
+
+        #Check for subnormal numbers and normalize them if present
+        subnormal_op1: bool = False
+        subnormal_op2: bool = False
+        
+        nlz_op1: int = 0 #number of leading 0s which is given by the mantissa
+        nlz_op2: int = 0 #number of leading 0s which is given by the mantissa
+
+        if num_1_exp.count(1) == 0 and (op1_mantissa.count(1) != 0):
+            subnormal_op1: bool = True
+            for bit in op1_mantissa:
+                if bit == 0:
+                    nlz_op1 += 1
+                else:
+                    break
+
+            nlz_op1 += 1 #add the hidden leading 0
+
+        if num_2_exp.count(1) == 0 and (op2_mantissa.count(1) != 0):
+            subnormal_op2: bool = True
+            for bit in op2_mantissa:
+                if bit == 0:
+                    nlz_op2 += 1
+                else:
+                    break
+            
+            nlz_op2 += 1 #add the hidden leading 0
+        
+        
+        #Calculate the new exponent and mantissa strings
+        if operation == "mul":
+            #Calculate the new exponent
+            new_exponent, mantissa_shift = self.add_sub_exponents(exponent_1 = num_1_exp, exponent_2 = num_2_exp, bias = exp_bias, intermediate_len = intermediate_buffer_len, final_len = exp_len,
+                                            mode = "add", subnormal_operand_1 = subnormal_op1, subnormal_operand_2 = subnormal_op2, nlz_operand_1 = nlz_op1,
+                                            nlz_operand_2 = nlz_op2)
+            
+            #Check if we got a subnormal product during exponent calculation
+            subnormal_product: bool = False
+            if new_exponent.count(1) == 0:
+                subnormal_product = True
+
+            #Calculate the new, full length mantissa product and the potential new exponent
+            new_exponent, mantissa_product = self.mant_multiplier(mantissa_1 = op1_mantissa, mantissa_2 = op2_mantissa, new_exponent = new_exponent, mantissa_length = mant_len,
+                                                            subn_multiplicand = subnormal_op1, subn_multiplier = subnormal_op2, nlz_multiplicand = nlz_op1, 
+                                                            nlz_multiplier = nlz_op2, subn_result = subnormal_product, subn_shift = mantissa_shift)
+
+        
+            #Round and trim the new mantissa_product to the proper length and handle potential rounding overflow into the new exponent
+            new_extended_mantissa: list[int] = mantissa_product #use the full mantissa product as an extended mantissa for rounding
+
+            extended_mantissa_string: str = "" #convert the extended mantissa to a string for the float rounding
+            exponent_string: str = "" #convert the extended exponent to a string for the float rounding
+
+            for bit in new_extended_mantissa: #mantissa string conversion
+                extended_mantissa_string += str(bit)
+
+            for bit in new_exponent: #exponent string conversion
+                exponent_string += str(bit)
+
+            rounding_bits: str = extended_mantissa_string[mant_len : (mant_len + 5)] #prepare the extra bits for rounding
+            mantissa_string: str = extended_mantissa_string[0 : mant_len] #prepare the mantissa for rounding
+
+        else:
+            #Calculate the new exponent
+            new_exponent, mantissa_shift = self.add_sub_exponents(exponent_1 = num_1_exp, exponent_2 = num_2_exp, bias = exp_bias, intermediate_len = intermediate_buffer_len, final_len = exp_len,
+                                            mode = "sub", subnormal_operand_1 = subnormal_op1, subnormal_operand_2 = subnormal_op2, nlz_operand_1 = nlz_op1,
+                                            nlz_operand_2 = nlz_op2)
+
+            #Check if we got a subnormal quotient during exponent calculation
+            subnormal_quotient: bool = False
+            if new_exponent.count(1) == 0:
+                subnormal_quotient = True
+
+            #Calculate the new, full length mantissa quotient the potential new exponent and the remainder which will be out sticky bits
+            new_exponent, mantissa_quotient, sticky_bits = self.mantissa_divider(mantissa_1 = op1_mantissa, mantissa_2 = op2_mantissa, new_exponent = new_exponent, mantissa_length = mant_len,
+                                                            subn_dividend = subnormal_op1, subn_divisor = subnormal_op2, nlz_dividend = nlz_op1, 
+                                                            nlz_divisor = nlz_op2, subn_result = subnormal_quotient, subn_shift = mantissa_shift)
+
+            
+            #Round and trim the new mantissa_product to the proper length and handle potential rounding overflow into the new exponent
+            new_extended_mantissa: list[int] = mantissa_quotient #use the full mantissa product as an extended mantissa for rounding
+            
+            extended_mantissa_string: str = "" #convert the extended mantissa to a string for the float rounding
+            sticky_bit_string: str = "" #convert the sticky bits (remainder) to a string for the float rounding
+            exponent_string: str = "" #convert the exponent to a string for the float rounding
+
+            for bit in new_extended_mantissa: #mantissa string conversion
+                extended_mantissa_string += str(bit)
+
+            for bit in sticky_bits: #sticky bits string conversion
+                sticky_bit_string += str(bit)
+
+            for bit in new_exponent: #exponent string conversion
+                exponent_string += str(bit)
+
+            rounding_bits: str = extended_mantissa_string[mant_len :] + sticky_bit_string #prepare the extra bits for rounding
+            mantissa_string: str = extended_mantissa_string[0 : mant_len] #prepare the mantissa for rounding
+
+
+        #Round the exponent and mantissa
+        final_exponent, final_mantissa = self.float_rounder(exponent = exponent_string, mantissa = mantissa_string, rounding_bits = rounding_bits)
+
+        
+        #Infinity check for the final exponent value and exit upon exponent overflow
+        if final_exponent.rfind("0") == -1: #only 1s, no 0s
+            final_exponent: str = ""
+            for bit in new_exponent:
+                final_exponent += str(bit)
+
+            final_mantissa: str = "0" * mant_len #mantissa must be all 0s
+
+            new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+            final_sign_bit: str = str(new_sign_bit)
+
+            float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+            
+
+            return self.binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+        
+
+        #Decide the sign bit using the xor operation
+        new_sign_bit = n1_bit_lst[0] ^ n2_bit_lst[0]
+        final_sign_bit: str = str(new_sign_bit)
+
+
+        #Assemble the new floating point number as a bit string
+        float_out_bit_string: str = final_sign_bit + final_exponent + final_mantissa
+
+
+        #Convert the new floating point bit string into a floating point number
+        float_out: float = self.binary_to_float(fpn_bit_string = float_out_bit_string, bit_len = precision)
+
+        return float_out
 
 
 
@@ -1749,7 +2520,7 @@ class FPU:
 
 
         self.last_op: str = ""
-        self.last_output: bytearray = bytearray()
+        self.last_output: bytearray | bytes = bytearray()
         self.last_output_type: str = ""
             
         self.register_supervisor: "RegisterSupervisor | None" = register_supervisor
@@ -1761,12 +2532,34 @@ class FPU:
 
     @override
     def __str__(self) -> str:
-        return f"< ALU: last operation {self.last_op} with an output {self.last_output} of type {self.last_output_type} >"
+        return f"< FPU: last operation {self.last_op} with an output {self.last_output} of type {self.last_output_type} >"
         
     @override
     def __repr__(self) -> str:
         return self.__str__()
+    
 
+    def multiply_divide_float(self, operation: str, destination: str, source_1: str, source_2: str) -> None:
+        #Take ownership of the register values
+        src_1, src_1_type = self.register_supervisor.read_register_bytes(target_register = source_1)
+        src_2, src_2_type = self.register_supervisor.read_register_bytes(target_register = source_2)
+
+        #Calculate the new floating point number
+        new_float: float = self.multiplier_divider.mul_div_floats(operation = operation, first_opernad = src_1, second_operand = src_2, first_operand_type = src_1_type, second_operand_type= src_2_type,
+                                                precision = 64)
+        print(new_float)
+
+        #Convert the new floating point number into a bytearray for transfer
+        buffer_out: bytearray | bytes = struct.pack("<d", new_float)
+        print(buffer_out)
+
+        #Write the new buffer to the target register
+        destination_type: str  = "float"
+        self.register_supervisor.write_register(target_register = destination, value = buffer_out, value_type = destination_type)
+
+        self.last_op = "fmult"
+        self.last_output = buffer_out
+        self.last_output_type = destination_type
 
 
 from Registers import RegisterSupervisor
