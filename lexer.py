@@ -35,7 +35,7 @@ def lexer(instructions: list[str], instruction_set: list[str], register_names: s
             continue
 
         elif instruction.find(";") != -1:
-            instruction = instruction.split(";", 1)[0]
+            instruction: str = instruction.split(sep = ";", maxsplit = 1)[0]
             
         if  instruction.endswith(":"):
             label_end: int =  instruction.find(":")
@@ -46,10 +46,10 @@ def lexer(instructions: list[str], instruction_set: list[str], register_names: s
             token_lst.append(Token(type = "OPCODE", value =  instruction))
 
         else:
-            opcode: str = instruction.split(" ", 1)[0]
+            opcode: str = instruction.split(sep = " ", maxsplit = 1)[0]
 
             if opcode in instruction_set and opcode not in [";", ":", "end", "ret"]:
-                operands: str = instruction.split(" ", 1)[1].strip()
+                operands: str = instruction.split(sep = " ", maxsplit = 1)[1].strip()
 
                 if opcode == "msg" and "," in operands:
                     token_lst.append(Token(type = "OPCODE", value = "msg"))
@@ -69,10 +69,10 @@ def lexer(instructions: list[str], instruction_set: list[str], register_names: s
                                 sub_char_p += 1
 
                             operand_lst.append("'" + message + "'")
-                            char_pointer = sub_char_p
+                            char_pointer: int = sub_char_p
                         
                         else:
-                            string_marker: set = {"'", '"'}
+                            string_marker: set[str] = {"'", '"'}
                             sub_char_p: int = char_pointer
                             sub_string: str = ""
 
@@ -82,7 +82,7 @@ def lexer(instructions: list[str], instruction_set: list[str], register_names: s
                                 sub_char_p += 1
 
                             operand_lst.append(sub_string)
-                            char_pointer = sub_char_p -1
+                            char_pointer: int = sub_char_p -1
 
                         char_pointer += 1
                     
@@ -106,10 +106,10 @@ def lexer(instructions: list[str], instruction_set: list[str], register_names: s
 
                 else:
                     token_lst.append(Token(type = "OPCODE", value = opcode))
-                    operands = operands.replace(" ", "")
+                    operands: str = operands.replace(" ", "")
 
                     if "," in operands:
-                        operand_lst = operands.split(",")
+                        operand_lst: list[str] = operands.split(sep = ",")
                         
                         for e in range(len(operand_lst)):
                             token_lst.append(operand_classifier(operand = operand_lst[e]))
