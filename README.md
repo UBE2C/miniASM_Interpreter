@@ -33,7 +33,7 @@ If you are interested in building a "not too serious" VM and having some fun whi
 - Design and implement an "Interpret" and a "REPL" mode.
 
 ### Courses on these topcis I follow
-Ross McGowan - Design a Floating Point Unit series (https://www.udemy.com/course/design-a-floating-point-unit-1-numbers)
+Ross McGowan - Design a Floating Point Unit series (https://www.udemy.com/course/design-a-floating-point-unit-1-numbers) <br />
              - Design a CPU series (https://www.udemy.com/course/design-a-cpu)
 
 ### Inspirations
@@ -43,8 +43,8 @@ I would like to say a huge thank you to the following games/creators (in no part
 - Turing Complete — an amazing game, check it out! :)
 - Shenzhen I/O — another banger of a game, give it a spin!
 
-**YouTube creators:** 
-CoreDumped (https://www.youtube.com/@CoreDumpped) 
-ThePrimagen (https://www.youtube.com/@ThePrimeTimeagen) 
-Casey Muratory (https://www.youtube.com/@caseymuratori) 
+**YouTube creators:** <br />
+CoreDumped (https://www.youtube.com/@CoreDumpped) <br />
+ThePrimagen (https://www.youtube.com/@ThePrimeTimeagen) <br />
+Casey Muratory (https://www.youtube.com/@caseymuratori) <br />
 Low Level (https://www.youtube.com/@LowLevelTV) 
