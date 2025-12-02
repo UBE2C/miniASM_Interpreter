@@ -33,7 +33,7 @@ If you are interested in building a "not too serious" VM and having some fun whi
 - Design and implement an "Interpret" and a "REPL" mode.
 
 ### Courses on these topcis I follow
-Ross McGowan 
+Ross McGowan <br />
     - Design a Floating Point Unit series (https://www.udemy.com/course/design-a-floating-point-unit-1-numbers) <br />
     - Design a CPU series (https://www.udemy.com/course/design-a-cpu)
 
