@@ -35,7 +35,7 @@ I would like to say a huge thank you to the following games/creators (in no part
 - Shenzhen I/O — another banger of a game, give it a spin!
 
 **YouTube creators:**
-CoreDumped (https://www.youtube.com/@CoreDumpped)
-ThePrimagen (https://www.youtube.com/@ThePrimeTimeagen)
-Casey Muratory (https://www.youtube.com/@caseymuratori)
-Low Level (https://www.youtube.com/@LowLevelTV)
+CoreDumped (https://www.youtube.com/@CoreDumpped) \n
+ThePrimagen (https://www.youtube.com/@ThePrimeTimeagen) \n
+Casey Muratory (https://www.youtube.com/@caseymuratori) \n
+Low Level (https://www.youtube.com/@LowLevelTV) \n
