@@ -45,6 +45,7 @@ I would like to say a huge thank you to the following games/creators (in no part
 - Shenzhen I/O — another banger of a game, give it a spin!
 
 **YouTube creators:** <br />
+<br />
 CoreDumped (https://www.youtube.com/@CoreDumpped) <br />
 ThePrimagen (https://www.youtube.com/@ThePrimeTimeagen) <br />
 Casey Muratory (https://www.youtube.com/@caseymuratori) <br />
