@@ -14,6 +14,10 @@ If you are interested in building a "not too serious" VM and having some fun whi
 - Partially built an FPU — only floating-point multiplication and division are implemented so far.
 - Partially integrated various components into a somewhat functioning VM for testing.
 
+### Main focus for now:
+- Finishing the FPU
+- Finishing the ALU
+
 ### To do (rough goals):
 - Finish the ALU by implementing multiplication, division, and logical operations.
 - Finish the FPU by implementing floating-point addition and subtraction.
@@ -27,6 +31,10 @@ If you are interested in building a "not too serious" VM and having some fun whi
 - Integrate the various components into a functional VM module.
 - Figure out and implement testing for each component.
 - Design and implement an "Interpret" and a "REPL" mode.
+
+### Courses on these topcis I follow
+Ross McGowan - Design a Floating Point Unit series (https://www.udemy.com/course/design-a-floating-point-unit-1-numbers)
+             - Design a CPU series (https://www.udemy.com/course/design-a-cpu)
 
 ### Inspirations
 I would like to say a huge thank you to the following games/creators (in no particular order) for sparking my interest in low-level concepts and inspiring me to explore how a CPU works:
