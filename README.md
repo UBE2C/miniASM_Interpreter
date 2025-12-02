@@ -1,6 +1,7 @@
 # The miniASM-VM
 
-## This is a fun attempt to build a fully functioning virtual machine and a minimal 64-bit CPU—with all its subcomponents and a dedicated RAM module—complete with its own type system, by modeling each component in Python.
+### The main idea
+This is a fun attempt to build a fully functioning virtual machine and a minimal 64-bit CPU—with all its subcomponents and a dedicated RAM module—complete with its own type system, by modeling each component in Python.
 
 For some time now, I've been fascinated by how hardware—especially the CPU—carries out various operations. Therefore, I decided I want to learn this stuff, and what better way is there to do that than to build one yourself?
 If you are interested in building a "not too serious" VM and having some fun while doing it, you are very welcome to join in.
