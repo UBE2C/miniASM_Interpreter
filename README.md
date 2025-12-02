@@ -33,8 +33,9 @@ If you are interested in building a "not too serious" VM and having some fun whi
 - Design and implement an "Interpret" and a "REPL" mode.
 
 ### Courses on these topcis I follow
-Ross McGowan - Design a Floating Point Unit series (https://www.udemy.com/course/design-a-floating-point-unit-1-numbers) <br />
-             - Design a CPU series (https://www.udemy.com/course/design-a-cpu)
+Ross McGowan 
+    - Design a Floating Point Unit series (https://www.udemy.com/course/design-a-floating-point-unit-1-numbers) <br />
+    - Design a CPU series (https://www.udemy.com/course/design-a-cpu)
 
 ### Inspirations
 I would like to say a huge thank you to the following games/creators (in no particular order) for sparking my interest in low-level concepts and inspiring me to explore how a CPU works:
