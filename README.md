@@ -44,6 +44,10 @@ I would like to say a huge thank you to the following games/creators (in no part
 - Turing Complete — an amazing game, check it out! :)
 - Shenzhen I/O — another banger of a game, give it a spin!
 
+**CodeWars Katas:** <br />
+ShinuToki - Assembler interpreter series (https://www.codewars.com/kata/simple-assembler-interpreter/) <br />
+Donaldsebleung - RoboScript series (https://www.codewars.com/kata/58708934a44cfccca60000c4) <br />
+
 **YouTube creators:** <br />
 <br />
 CoreDumped (https://www.youtube.com/@CoreDumpped) <br />
