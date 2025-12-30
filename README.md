@@ -40,7 +40,7 @@ Ross McGowan <br />
 ### Inspirations
 I would like to say a huge thank you to the following games/creators (in no particular order) for sparking my interest in low-level concepts and inspiring me to explore how a CPU works:
 
-**Games:**
+**Games:** <br />
 - Turing Complete — an amazing game, check it out! :)
 - Shenzhen I/O — another banger of a game, give it a spin!
 
@@ -49,7 +49,6 @@ ShinuToki - Assembler interpreter series (https://www.codewars.com/kata/simple-a
 Donaldsebleung - RoboScript series (https://www.codewars.com/kata/58708934a44cfccca60000c4) <br />
 
 **YouTube creators:** <br />
-<br />
 CoreDumped (https://www.youtube.com/@CoreDumpped) <br />
 ThePrimagen (https://www.youtube.com/@ThePrimeTimeagen) <br />
 Casey Muratory (https://www.youtube.com/@caseymuratori) <br />
